@@ -1,0 +1,17 @@
+# MERA 后端运行依赖（FastAPI + Celery）
+# Playwright 不写入此文件：由 Dockerfile 构建参数 INSTALL_PLAYWRIGHT=true 按需安装
+# Robot Framework / Appium 等 RPA 依赖仅安装在独立 RPA 节点，见采集实现指南 requirements/rpa.txt
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic-settings>=2.7
+celery[redis]>=5.4
+redis>=5.0
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg[binary]>=3.2
+requests>=2.32
+httpx>=0.27
+pyyaml>=6.0
+pyjwt>=2.9
+cryptography>=43.0
+python-multipart>=0.0.9

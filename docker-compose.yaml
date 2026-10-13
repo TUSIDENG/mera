@@ -1,0 +1,237 @@
+# MERA 本地一体化部署 (docker compose v2)
+# 启动: docker compose up -d
+# 首次启动 Casdoor 后，在 Casdoor 管理后台创建 mera 应用并同步填回 .env 的 OIDC 参数
+# 服务拓扑:
+#   1 个 backend-app (FastAPI)   1 个 frontend-app (React + Nginx)
+#   2 个 worker (Celery 数据采集) 1 个 beat (定时调度)
+#   PostgreSQL / Redis / Casdoor(+其内置 PostgreSQL)
+name: mera
+
+x-backend-build: &backend-build
+  context: ./backend
+  dockerfile: Dockerfile
+  args:
+    # true: 在镜像内安装 Playwright + Chromium（本地部署默认开启，两个 worker 均可执行浏览器策略）
+    INSTALL_PLAYWRIGHT: "true"
+
+# 后端进程共享的环境变量（backend / worker / beat 复用）
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg://mera:${POSTGRES_PASSWORD:-mera_local_pass}@postgres:5432/mera
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  REDIS_URL: redis://redis:6379/0
+  CASDOOR_ENDPOINT: http://casdoor:8000
+  CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:-}
+  CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:-}
+  OIDC_ISSUER: http://localhost:8000
+  FRONTEND_URL: http://localhost:3000
+  MAX_FETCH_ATTEMPTS: "3"
+  TZ: Asia/Shanghai
+
+services:
+  # ───────────────────────── 基础设施 ─────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    container_name: mera-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mera
+      POSTGRES_USER: mera
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mera_local_pass}
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mera -d mera"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mera-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: mera-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mera-net]
+
+  # Casdoor 自身使用的独立 PostgreSQL（与业务库隔离）
+  casdoor-postgres:
+    image: postgres:16-alpine
+    container_name: mera-casdoor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: casdoor
+      POSTGRES_USER: casdoor
+      POSTGRES_PASSWORD: casdoor_local_pass
+    volumes:
+      - casdoor_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U casdoor -d casdoor"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mera-net]
+
+  casdoor:
+    image: casbin/casdoor:latest
+    container_name: mera-casdoor
+    restart: unless-stopped
+    depends_on:
+      casdoor-postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./deploy/casdoor/app.conf:/conf/app.conf:ro
+    networks: [mera-net]
+
+  # ───────────────────────── 应用层 ─────────────────────────
+  backend-app:
+    build: *backend-build
+    image: mera/backend:latest
+    container_name: mera-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8000"
+    # 启动前执行数据库迁移/初始化，随后拉起 API
+    command: ["/app/scripts/start-backend.sh"]
+    volumes:
+      # 挂载站点采集配置与逆向资产，本地调整 config.yaml 无需重新构建
+      - ./backend/app/fetchers/sites:/app/app/fetchers/sites:ro
+    networks: [mera-net]
+
+  # Worker 实例 1：轻量任务（官方 API / 逆向接口），消费 default + fetch_api 队列
+  worker-1:
+    build: *backend-build
+    image: mera/backend:latest
+    container_name: mera-worker-1
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *backend-env
+      CELERY_QUEUES: "default,fetch_api"
+    depends_on:
+      - backend-app
+    command:
+      - celery
+      - -A
+      - app.worker.celery_app
+      - worker
+      - -Q
+      - default,fetch_api
+      - -n
+      - worker-api@%h
+      - --concurrency=4
+      - -l
+      - INFO
+    volumes:
+      - ./backend/app/fetchers/sites:/app/app/fetchers/sites:ro
+    networks: [mera-net]
+
+  # Worker 实例 2：重型任务（Playwright 浏览器自动化），消费 default + fetch_browser 队列
+  # 与 worker-1 同为 default 队列消费者，互为冗余；浏览器任务仅由此实例处理
+  worker-2:
+    build: *backend-build
+    image: mera/backend:latest
+    container_name: mera-worker-2
+    restart: unless-stopped
+    shm_size: "1gb"   # Chromium 需要较大 /dev/shm，否则易崩溃
+    env_file:
+      - .env
+    environment:
+      <<: *backend-env
+      CELERY_QUEUES: "default,fetch_browser"
+    depends_on:
+      - backend-app
+    command:
+      - celery
+      - -A
+      - app.worker.celery_app
+      - worker
+      - -Q
+      - default,fetch_browser
+      - -n
+      - worker-browser@%h
+      - --concurrency=2
+      - -l
+      - INFO
+    volumes:
+      - ./backend/app/fetchers/sites:/app/app/fetchers/sites:ro
+    networks: [mera-net]
+
+  # Celery Beat：定时采集调度（单实例，避免重复触发）
+  beat:
+    build: *backend-build
+    image: mera/backend:latest
+    container_name: mera-beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment: *backend-env
+    depends_on:
+      - backend-app
+    command: celery -A app.worker.celery_app beat -l INFO
+    volumes:
+      - beat_data:/app/celerybeat
+    networks: [mera-net]
+
+  frontend-app:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: mera/frontend:latest
+    container_name: mera-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend-app
+    ports:
+      - "3000:80"
+    networks: [mera-net]
+
+  # ───────────────────────── 可选运维组件 ─────────────────────────
+  # Celery 监控面板: docker compose --profile monitor up -d
+  flower:
+    image: mera/backend:latest
+    container_name: mera-flower
+    profiles: ["monitor"]
+    env_file:
+      - .env
+    environment: *backend-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.worker.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    networks: [mera-net]
+
+volumes:
+  pg_data:
+  redis_data:
+  casdoor_pg_data:
+  beat_data:
+
+networks:
+  mera-net:
+    driver: bridge
