@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
 
+    # --- 采集熔断（M05 使用，M02 状态机测试共享默认值） ---
+    min_fetch_hits: int = 1
+    max_fetch_attempts: int = 3
+
     # --- 认证（M03 使用，预留） ---
     casdoor_endpoint: str | None = None
     casdoor_client_id: str | None = None
@@ -65,4 +69,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """进程级单例入口；测试应直接构造 Settings 并注入 create_app。"""
-    return Settings()
+    return Settings()  # type: ignore[call-arg]

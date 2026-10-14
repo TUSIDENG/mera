@@ -11,7 +11,6 @@ from app.core.exceptions import AppError, AuthError, InvalidWeights
 from app.core.logging import JsonFormatter, get_logger
 from app.main import create_app
 
-
 # ---------------- Settings（配置装载） ----------------
 
 def test_settings_load_from_env(monkeypatch):
@@ -97,7 +96,7 @@ def test_api_router_empty_until_m04():
 def test_healthz_at_root_not_under_api_prefix(client):
     """healthz 挂根路径供 compose 探测；业务前缀下不应有同路径。"""
     assert client.get("/healthz").status_code == 200
-    assert client.get(f"/api/v1/healthz").status_code == 404
+    assert client.get("/api/v1/healthz").status_code == 404
 
 
 # ---------------- 统一异常处理 ----------------

@@ -14,6 +14,9 @@ markers = [
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+ignore = ["EXE002"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
