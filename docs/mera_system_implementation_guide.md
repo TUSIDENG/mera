@@ -139,7 +139,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 
 ## 4. 模块卡片
 
-### M01 项目骨架与基础设施
+### M01 项目骨架与基础设施（✅ 已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -149,9 +149,10 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | app factory 模式（测试可多实例）；中间件顺序：CORS → 认证 → RLS 会话；路由 router 在 `api/v1/__init__.py` 汇总注册 |
 | 依赖 | 无（起点模块） |
 | 测试方案 | `create_app` 不连 DB 可构造（DB 引擎懒加载）；`/healthz` 返回 200；Settings 从 monkeypatch 的环境变量读取、缺必填项启动即报错 |
-| 验收清单 | [ ] uvicorn 可启动 [ ] /healthz 200 [ ] 未知异常返回 500 且响应不含堆栈 |
+| 实现状态 | **✅ 已实现（2026-10）**：app factory、Settings、结构化日志、异常 handler、`/healthz` 全部落地；单测 `tests/unit/test_m01_app.py` 15 用例全绿，ruff/mypy 通过 |
+| 验收清单 | [x] uvicorn 可启动 [x] /healthz 200 [x] 未知异常返回 500 且响应不含堆栈 |
 
-### M02 数据模型与仓储层
+### M02 数据模型与仓储层（✅ 已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -162,9 +163,10 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 依赖 | M01 |
 | 下游 | M04 M05 M06 M08 M09 M10 |
 | 测试方案 | 单测：SQLite/内存会话验证三类 UPSERT 幂等（重复键行数不变、值更新）、状态机全部合法/非法迁移（重点：`hit_count≥1` 到顶只能 `partial_succeeded` 不得 `failed_exhausted`；`hit_count=0` 到顶只能 `failed_exhausted`）、部分冲突批量、事务回滚；集成：真实 PG 验证 JSONB、RLS 隔离、UUIDv7、`ck_fetch_terminal_hit_count` 约束 |
-| 验收清单 | [ ] alembic upgrade head 可从空库建全五表 [ ] 幂等用例通过 [ ] 部分成功终态分流用例通过 [ ] RLS 集成用例通过 |
+| 实现状态 | **✅ 已实现（2026-10）**：五表 ORM + Alembic `0001_initial`（JSONB、UUIDv7、UUID[]、GIN、部分唯一索引、CHECK、RLS 策略）+ `Repository` 三类 UPSERT 与 fetch_tasks 状态机/终态分流全部落地。单测 `tests/unit/m02/` 42 用例（SQLite 内存）+ 集成 `test_m02_postgres.py` 4 用例（PostgreSQL 18）全绿；`alembic downgrade base → upgrade head` 往返通过；ruff/mypy 通过 |
+| 验收清单 | [x] alembic upgrade head 可从空库建全五表 [x] 幂等用例通过 [x] 部分成功终态分流用例通过 [x] RLS 集成用例通过 |
 
-### M03 认证与授权（Casdoor OIDC + RLS）
+### M03 认证与授权（Casdoor OIDC + RLS）（✅ 已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -174,7 +176,8 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | JWKS 启动时拉取并缓存（注入时钟做缓存过期）；`alg` 白名单防混淆；RLS 变量值做引号转义防注入 |
 | 依赖 | M01；Casdoor 配置（架构文档 7.3） |
 | 测试方案 | 单测：fixture 本地生成 RSA keypair 构造 token，覆盖合法/过期（now 注入推后）/篡改签名/错误 aud/无 org 各分支；`build_rls_vars` 转义用例 |
-| 验收清单 | [ ] 全部非法 token 分支抛 `AuthError` 且 401 [ ] RLS 会话集成用例通过 |
+| 实现状态 | **✅ 已实现（2026-10）**：`decode_token`（alg 白名单防混淆、kid 匹配、过期/生效时间 now 注入、aud/iss 校验）+ `JwksCache`（TTL 缓存、启动预热失败不阻塞）+ `get_current_identity`/`get_db_session`（事务内 `SET LOCAL ROLE` + GUC 注入）全部落地；`casdoor_issuer` 支持容器内外地址分离。单测 `tests/unit/m03/` 32 用例（非法 token 全分支 401、JWKS TTL、RLS 转义）+ PG 集成 `test_m03_rls.py` 3 用例（组织只读隔离/组织内写入/跨组织写入拒绝）全绿；ruff/mypy 通过 |
+| 验收清单 | [x] 全部非法 token 分支抛 `AuthError` 且 401 [x] RLS 会话集成用例通过 |
 
 ### M04 REST API
 
