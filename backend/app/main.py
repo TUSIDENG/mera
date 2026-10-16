@@ -13,6 +13,7 @@ from app.api.v1 import api_router
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
+from app.core.security import JwksCache
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -22,6 +23,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, debug=settings.debug)
     app.state.settings = settings
+
+    # M03：启动时创建 JWKS 缓存并尝试预热；Casdoor 未就绪只记日志，不阻塞启动
+    if settings.casdoor_endpoint and settings.casdoor_client_id:
+        jwks_cache = JwksCache(
+            f"{settings.casdoor_endpoint.rstrip('/')}/.well-known/jwks",
+            ttl_seconds=settings.jwks_cache_ttl_seconds,
+        )
+        try:
+            jwks_cache.get_jwks()
+        except AppError:
+            logger.warning("JWKS 启动预热失败，将在首个请求时重试", exc_info=True)
+        app.state.jwks_cache = jwks_cache
+    else:
+        app.state.jwks_cache = None
 
     # 1) CORS（认证 / RLS 会话中间件在 M02/M03 完成后按顺序在其后注册）
     app.add_middleware(

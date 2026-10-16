@@ -1,17 +1,17 @@
-"""M02 PostgreSQL 集成测试：真实 JSONB、UUIDv7、约束与组织 RLS。"""
+"""M02 PostgreSQL 集成测试：真实 JSONB、UUIDv7、约束与组织 RLS。
+
+postgres_url / migrated_settings / session_factory 夹具见 tests/integration/conftest.py。
+"""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import Settings
 from app.db.enums import FetchTaskStatus
 from app.db.models import FetchTask, ModelSnapshot, UserEvaluation
 from app.db.rls import set_rls_context
@@ -19,37 +19,6 @@ from app.db.uuid7 import uuid7
 from app.repositories import CreateTaskParams, Repository
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(scope="module")
-def postgres_url() -> Iterator[str]:
-    external_url = os.getenv("TEST_DATABASE_URL")
-    if external_url:
-        yield external_url
-        return
-
-    testcontainers = pytest.importorskip("testcontainers.postgresql")
-    with testcontainers.PostgresContainer("postgres:18-alpine") as postgres:
-        yield postgres.get_connection_url(driver="psycopg")
-
-
-@pytest.fixture()
-def session_factory(postgres_url: str) -> sessionmaker[Session]:
-    settings = Settings(
-        _env_file=None,
-        database_url=postgres_url,
-        redis_url="redis://localhost:6379/0",
-    )
-    from alembic import command
-    from alembic.config import Config
-
-    config = Config("alembic.ini")
-    config.set_main_option("script_location", "app/db/alembic")
-    config.set_main_option("sqlalchemy.url", settings.database_url)
-    command.upgrade(config, "head")
-
-    engine = create_engine(settings.database_url, future=True)
-    return sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def test_migration_creates_five_tables(session_factory: sessionmaker[Session]) -> None:

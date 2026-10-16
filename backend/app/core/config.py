@@ -33,10 +33,11 @@ class Settings(BaseSettings):
     min_fetch_hits: int = 1
     max_fetch_attempts: int = 3
 
-    # --- 认证（M03 使用，预留） ---
+    # --- 认证（M03） ---
     casdoor_endpoint: str | None = None
     casdoor_client_id: str | None = None
     casdoor_client_secret: str | None = None
+    jwks_cache_ttl_seconds: int = 3600
 
     # --- 通知（M10 使用，预留；SMTP 未配置则仅走 WebSocket） ---
     smtp_host: str | None = None
