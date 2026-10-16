@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     casdoor_endpoint: str | None = None
     casdoor_client_id: str | None = None
     casdoor_client_secret: str | None = None
+    # token 的 iss 与容器内 endpoint 不一致时显式指定（如本地 localhost vs 容器名 casdoor）
+    casdoor_issuer: str | None = None
     jwks_cache_ttl_seconds: int = 3600
 
     # --- 通知（M10 使用，预留；SMTP 未配置则仅走 WebSocket） ---

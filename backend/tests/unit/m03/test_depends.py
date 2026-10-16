@@ -111,6 +111,24 @@ def test_tampered_signature_returns_401(client: TestClient, other_private_key: A
     assert response.status_code == 401
 
 
+def test_issuer_override_for_split_endpoint(
+    monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any], rsa_private_key: Any
+) -> None:
+    """容器内外地址不一致（多环境常见）：endpoint 走内网，token iss 为外部地址。"""
+    app = _build_app(
+        monkeypatch,
+        jwks,
+        casdoor_endpoint="http://casdoor-internal:8000",
+        casdoor_issuer=ISSUER,
+    )
+    token = make_token(rsa_private_key)
+
+    response = TestClient(app).get("/whoami", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == "user-1"
+
+
 def test_casdoor_not_configured_returns_401(
     monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any], rsa_private_key: Any
 ) -> None:

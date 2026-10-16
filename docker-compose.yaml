@@ -23,7 +23,7 @@ x-backend-env: &backend-env
   CASDOOR_ENDPOINT: http://casdoor:8000
   CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:-}
   CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:-}
-  OIDC_ISSUER: http://localhost:8000
+  CASDOOR_ISSUER: http://localhost:8000
   FRONTEND_URL: http://localhost:3000
   MAX_FETCH_ATTEMPTS: "3"
   TZ: Asia/Shanghai

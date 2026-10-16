@@ -42,7 +42,7 @@ def get_current_identity(request: Request) -> Identity:
         cache.get_jwks(),
         time.time(),
         audience=settings.casdoor_client_id,
-        issuer=settings.casdoor_endpoint.rstrip("/"),
+        issuer=(settings.casdoor_issuer or settings.casdoor_endpoint).rstrip("/"),
     )
 
 
