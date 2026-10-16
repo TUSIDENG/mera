@@ -1,0 +1,38 @@
+# Artificial Analysis 榜单：逆向前端结构化接口为主，Playwright 表格解析兜底
+# 密钥缺失时 reverse_api 方案 is_available()=False，由编排层记录 skipped 后走 playwright
+key: artificial_analysis
+domain: general
+data_type: model_metrics
+auth_required: api_key
+strategies: [reverse_api, playwright]
+rate_limit_per_min: 10
+compliance:
+  public_only: true
+  notes: 仅访问公开榜单数据；站点明确限制自动化时停用改人工/授权数据
+reverse_api:
+  endpoint: https://artificialanalysis.ai/api/v1/leaderboard/models
+  page_size: 50
+  sign:
+    algo: hmac_md5
+    secret_ref: env:AA_SECRET
+    timestamp_param: timestamp
+    sign_param: sign
+playwright:
+  url: https://artificialanalysis.ai/leaderboards/models
+  rows_selector: "table.leaderboard tbody tr"
+  next_selector: "button.next-page"
+  fields:
+    model: "td:nth-child(1)"
+    score: "td:nth-child(2)"
+    provider: "td:nth-child(3)"
+  fingerprint_browser:
+    enabled: false # 强风控时开启；camoufox 进程内，adspower/bitbrowser 经 Local API + CDP
+    provider: camoufox
+    local_api: http://host.docker.internal:50325
+    profile_id: mera_aa_01
+    startup_wait_sec: 30
+normalize:
+  fields:
+    model_id: model
+    provider: provider
+    score: score

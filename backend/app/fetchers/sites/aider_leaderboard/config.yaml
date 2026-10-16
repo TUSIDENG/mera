@@ -1,0 +1,24 @@
+# Aider LLM 代码编辑榜单：公开页面 HTML，Playwright 解析表格（无需登录）
+key: aider_leaderboard
+domain: coding
+data_type: model_metrics
+auth_required: false
+strategies: [playwright]
+rate_limit_per_min: 5
+compliance:
+  public_only: true
+  notes: 仅解析公开榜单页表格，低频访问，遵守站点条款
+playwright:
+  url: https://aider.chat/docs/leaderboards/
+  rows_selector: "table tbody tr"
+  next_selector: null # 单页榜单，无翻页
+  fields:
+    model: "td:nth-child(2)"
+    score: "td:nth-child(3)"
+    cost: "td:nth-child(5)"
+normalize:
+  defaults:
+    provider: aider
+  fields:
+    model_id: model
+    score: score

@@ -1,0 +1,25 @@
+# OpenRouter 模型目录：官方 Models API（公开 JSON，无需登录）
+# 可选 OPENROUTER_API_KEY 仅用于官方授权读取、提高限额；缺失不影响方案可用性
+key: openrouter
+domain: general
+data_type: model_metrics
+auth_required: false
+strategies: [api]
+rate_limit_per_min: 30
+compliance:
+  public_only: true
+  notes: 仅采集公开模型目录与公开价格，遵守 OpenRouter 服务条款与限频
+api:
+  url: https://openrouter.ai/api/v1/models
+  records_path: data
+  api_key_ref: env:OPENROUTER_API_KEY # 可选
+normalize:
+  defaults:
+    provider: openrouter
+  fields:
+    model_id: id
+    score: score # 公开评分缺失时按脏值处理
+    input_price: pricing.prompt
+    output_price: pricing.completion
+    context_length: context_length
+    display_name: name

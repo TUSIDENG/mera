@@ -188,7 +188,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 测试方案 | TestClient + `dependency_overrides` 替换 identity 与 repo（M02 未就绪时用 Mock）：参数校验 422、无 token 401、repo 业务异常 → 404/409、入队调用被记录 |
 | 验收清单 | [ ] OpenAPI 文档可访问 [ ] 每条路由至少 正常/鉴权失败/参数非法 三个用例 |
 
-### M05 采集框架核心（四件套）
+### M05 采集框架核心（五件套，✅ 已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -199,9 +199,10 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 依赖 | M02（repo 接口）；M01 |
 | 下游 | M06 M07 M08 |
 | 测试方案 | 全部假体：FakeFetcher（构造时给 available、records 或 error 或 truncated）、FakeTask（记录状态迁移与 skipped 原因）、Mock repo（返回注入的 hit_count）、clock 注入。核心用例：①配置缺 key/strategies 非法/引用不存在方案→ConfigError，站点未实现未声明的方案不报错；②parse_score/price 脏值矩阵（"89.5 分"/"N/A"/"$3.00"/负数）；③签名 golden 值+参数顺序无关+secret 不出现在异常消息；④状态机分支（首方案成功/降级成功/缺文件跳过/**is_available=False 因缺密钥或会话跳过**/跳过与失败混合后继续/**全部跳过且 hit_count=0→failed_exhausted**/**到顶 hit_count=2→partial_succeeded 且不熔断**/**到顶 hit_count=0→failed_exhausted**/**truncated=True→partial_succeeded**/重试退避时间断言/验证码短路/空结果降级）；⑤normalize 幂等 |
-| 验收清单 | [ ] 状态机分支覆盖 100%，含“未实现/不可用方案跳过”分支 [ ] 所有可用方案结束仍 0 条时才 `failed_exhausted` [ ] 单测无任何网络/DB 依赖 |
+| 实现状态 | **✅ 已实现（2026-10）**：五件套全部落地。`run_fetch` 复用 M02 `decide_run_result`，终态语义与仓储层完全一致；不可用方案的 skip 记录在一次运行内按方案名去重（失败日志仍每轮记录）；`RepoTaskHandle` 适配 M02 仓储任务方法族，skip/failure/empty 明细入 `event_log`。单测 `tests/unit/m05/`（config_loader/normalize/signing/orchestrator 四组 + fakes.py 假体），与 M06 合计 131 用例全绿、ruff 通过，无任何网络/DB 依赖 |
+| 验收清单 | [x] 状态机分支覆盖 100%，含“未实现/不可用方案跳过”分支 [x] 所有可用方案结束仍 0 条时才 `failed_exhausted` [x] 单测无任何网络/DB 依赖 |
 
-### M06 站点采集实现（api / reverse_api / playwright / 指纹浏览器）
+### M06 站点采集实现（api / reverse_api / playwright / 指纹浏览器，✅ 首批已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -211,11 +212,30 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | 异常分类：HTTP 4xx/超时/坏 JSON → `FetchFailed`；响应体 `code=CAPTCHA_REQUIRED` → `CaptchaRequired`；限频 sleep 经注入；指纹浏览器按 config `provider`（adspower/bitbrowser 经 Local API + CDP；camoufox 进程内；详见采集指南 4.1）。**选择路线原则**：官方 API/公开 JSON/CSV > 前端逆向接口 > Playwright DOM > 指纹浏览器；后两者只在公开数据无法用前两种稳定获取时使用。需要登录的站点必须显式声明并复用授权会话；没有授权凭据时方案 `is_available()=False`，由 M05 跳过，不做账号破解、不绕过付费/隐私墙 |
 | 依赖 | M05 |
 | 测试方案 | `responses/respx` 注册 200/403/超时/坏 JSON/验证码响应 → 断言异常类型与 RequestSpec 内容（secret 不出现）；假 `page` 对象（Mock(spec=Page) 返回预制元素）测 parse_dom 与分页循环终止；指纹 Local API 用 responses mock start/stop；缺少 API Key/session/profile 时断言方案被标记为 skipped，而不是失败或发起网络请求 |
-| 验收清单 | [ ] 首批至少 3 个站点：1 个官方/公开数据、1 个逆向接口、1 个 Playwright/指纹兜底跑通 [ ] 每站点单测覆盖请求构造+解析+异常分支+会话缺失跳过 [ ] `config.yaml` 明确登录要求与实际采用路线 |
+| 实现状态 | **✅ 首批已实现（2026-10）**：3 个站点覆盖三类路线——openrouter（官方 API）、artificial_analysis（逆向接口 + Playwright 兜底）、aider_leaderboard（Playwright 公开表格），明细见 M06.1 进度表。单测 `tests/unit/m06/`（站点配置冒烟 + 各站点方案共五组）：`responses` mock 全部 HTTP（200/403/超时/坏 JSON/验证码）、假 `page` 对象测 DOM 解析与翻页终止、指纹浏览器 Local API start/stop mock、密钥/会话缺失断言 skipped 且不发起请求 |
+| 验收清单 | [x] 首批至少 3 个站点：1 个官方/公开数据、1 个逆向接口、1 个 Playwright/指纹兜底跑通 [x] 每站点单测覆盖请求构造+解析+异常分支+会话缺失跳过 [x] `config.yaml` 明确登录要求与实际采用路线 |
 
 #### M06.1 首批站点/数据源目录（P1 建议实现，可按可访问性裁剪）
 
 > 优先级表示建议落地顺序，不要求一次性全部实现。实际实施前需重新确认目标站点当前服务条款、robots 与页面结构；禁止采集非公开数据、个人私信或个人敏感信息。
+
+**各站点数据获取实现进度（2026-10 更新）**
+
+| 站点 | 类别 | 状态 | 数据获取实现说明 |
+|---|---|---|---|
+| OpenRouter | A 榜单 / B 聚合价格 | ✅ 已实现 | `strategies: [api]`：官方 Models API 公开 JSON（`GET /api/v1/models`，`records_path: data`），`auth_required: false`，可选 `env:OPENROUTER_API_KEY` 提高限额（缺失不影响可用性）；限频 30/min 经注入 sleep 控制；字段映射含 `pricing.prompt/completion` 点路径取价；`build_request/parse_response` 纯函数可单测 |
+| Artificial Analysis | A 榜单 | ✅ 已实现 | `strategies: [reverse_api, playwright]`。reverse_api 为主：逆向前端结构化接口，HMAC-MD5 签名（sorted 参数 + timestamp），密钥 `env:AA_SECRET` 不进请求参数、缺失时 `is_available()=False` 由 M05 记 skipped 后自动降级；`parse_response` 返回 `(records, has_more, truncated)` 三元组区分服务端截断与翻页。playwright 兜底：公开榜单页表格解析 + 翻页，可选指纹浏览器（`fingerprint_browser.provider` 支持 camoufox/adspower/bitbrowser，默认关闭） |
+| Aider Leaderboard | A 编程榜单 | ✅ 已实现 | `strategies: [playwright]`：公开页面 HTML 表格解析（`auth_required: false`），单页榜单无翻页（`next_selector: null`），`domain: coding`，provider 缺省回填 `aider`；`parse_dom` 纯函数 + 假 page 单测 |
+| LiveCodeBench | A 编程榜单 | ⬜ 待实现 | 规划路线：HF/GitHub 公开数据集文件；新增站点目录即可，框架零改动 |
+| LMArena / Chatbot Arena | A 榜单 | ⬜ 待实现 | 规划路线：前端 XHR 逆向 → Playwright/指纹兜底；触发验证码转 M07 |
+| Vellum / OpenCompass / SuperCLUE / HF Open LLM | A 榜单 | ⬜ 待实现 | 规划路线见下表 A；优先公开发布的数据文件 |
+| OpenAI / Anthropic / Google 定价页 | B 价格/套餐 | ⬜ 待实现 | 规划路线见下表 B；账号内合同价不自动采集 |
+| 国内厂商（DeepSeek/Kimi/GLM/百炼/千帆等） | B 价格 | ⬜ 待实现 | 规划路线：官方价格页/公开 JSON → Playwright |
+| 云厂商 GPU 价格（AWS/Azure/GCP 等） | B 基础设施成本 | ⬜ 待实现 | 规划路线：官方 Price List API（最小只读凭据） |
+| 订阅套餐页（Plus/Pro/Max 等） | B 订阅套餐 | ⬜ 待实现 | 以管理员录入为主，采集仅作补充 |
+| X / Reddit / HN / PH / YouTube | C 舆情信号 | ⬜ 待实现（P2 可选） | 仅官方 API 授权路线；未配置凭据时 `is_available()=False` 跳过 |
+
+> 已实现的 3 个站点对应下表 A/B 中的 P0/P1 行；其余行保持规划口径不变，实施时按"新增站点目录 + config.yaml 声明"接入，`app/fetchers/` 框架代码零改动。
 
 ##### A. 模型与编程能力榜单
 
@@ -357,8 +377,8 @@ P0 骨架可用
   [ ] M04 路由骨架 + OpenAPI
   [ ] M12 CI 绿灯
 P1 数据能进来
-  [ ] M05 四件套（状态机分支 100%）
-  [ ] M06 首批至少 3 站点（API/公开数据、逆向、Playwright 兜底各覆盖一类）
+  [x] M05 五件套（状态机分支 100%，131 用例含 M06 全绿）
+  [x] M06 首批至少 3 站点（API/公开数据、逆向、Playwright 兜底各覆盖一类）
   [ ] M07 验证码分派
   [ ] M08 beat 定时 → API 可见数据
 P2 能出结论
