@@ -16,10 +16,12 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.exceptions import AuthError
+from app.core.exceptions import AuthError, ForbiddenError
 from app.core.security import Identity, JwksCache, decode_token
 from app.db.rls import set_rls_context
 from app.db.session import get_session_factory
+from app.repositories.repository import Repository
+from app.services.enqueue import FetchTaskEnqueuer
 
 
 def get_current_identity(request: Request) -> Identity:
@@ -63,3 +65,47 @@ def get_db_session(
     settings: Settings = request.app.state.settings
     with open_rls_session(settings, identity) as session:
         yield session
+
+
+# --- M04 依赖 ---
+
+ADMIN_ROLE = "mera-admin"
+
+
+def get_repository(
+    session: Annotated[Session, Depends(get_db_session)],
+) -> Repository:
+    """业务路由仓储：绑定已注入 RLS 上下文的会话。"""
+    return Repository(session)
+
+
+def get_plain_session(request: Request) -> Iterator[Session]:
+    """无 RLS 的事务会话：仅供 /internal 内网路由（fetch_tasks 等表无 RLS）。"""
+    settings: Settings = request.app.state.settings
+    factory = get_session_factory(settings)
+    with factory() as session, session.begin():
+        yield session
+
+
+def get_internal_repository(
+    session: Annotated[Session, Depends(get_plain_session)],
+) -> Repository:
+    return Repository(session)
+
+
+def require_admin(
+    identity: Annotated[Identity, Depends(get_current_identity)],
+) -> Identity:
+    """管理端角色校验：mera-admin（Casdoor 组织级角色，禁止全局 admin）。"""
+    if ADMIN_ROLE not in identity.roles:
+        raise ForbiddenError("需要管理员角色 mera-admin")
+    return identity
+
+
+def get_enqueuer(request: Request) -> FetchTaskEnqueuer:
+    """进程级共享的入队器（懒加载 Celery，缓存于 app.state）。"""
+    enqueuer = getattr(request.app.state, "fetch_enqueuer", None)
+    if enqueuer is None:
+        enqueuer = FetchTaskEnqueuer(request.app.state.settings)
+        request.app.state.fetch_enqueuer = enqueuer
+    return enqueuer

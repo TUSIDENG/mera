@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     casdoor_issuer: str | None = None
     jwks_cache_ttl_seconds: int = 3600
 
+    # --- 内网接口（M04：RPA 回调等 /internal 路由共享密钥） ---
+    internal_api_token: str | None = None
+
     # --- 通知（M10 使用，预留；SMTP 未配置则仅走 WebSocket） ---
     smtp_host: str | None = None
     smtp_port: int = 465

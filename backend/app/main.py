@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.health import router as health_router
 from app.api.v1 import api_router
+from app.api.v1.internal import router as internal_router
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
@@ -66,8 +67,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"code": "internal_error", "message": "internal server error"},
         )
 
-    # 3) 路由：/healthz 在根路径；业务路由统一挂 settings.api_prefix
+    # 3) 路由：/healthz 与 /internal（M04 内网回调）在根路径；业务路由挂 settings.api_prefix
     app.include_router(health_router)
+    app.include_router(internal_router)
     app.include_router(api_router, prefix=settings.api_prefix)
     return app
 

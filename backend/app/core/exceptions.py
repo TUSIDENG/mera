@@ -69,6 +69,20 @@ class InvalidTransition(AppError):
     status_code = 409
 
 
+class NotFoundError(AppError):
+    """M04 资源不存在（404）。"""
+
+    code = "not_found"
+    status_code = 404
+
+
+class ForbiddenError(AppError):
+    """M04 已认证但无权限（403）。"""
+
+    code = "forbidden"
+    status_code = 403
+
+
 class InvalidWeights(AppError):
     """M09 评分权重非法（权重和 != 1）。"""
 

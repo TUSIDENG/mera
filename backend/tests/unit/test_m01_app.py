@@ -86,11 +86,11 @@ def test_healthz_ok(client):
     assert body["app_env"] == "local"
 
 
-def test_api_router_empty_until_m04():
-    """业务路由统一挂 /api/v1；M04 之前聚合 router 保持为空。"""
+def test_api_router_populated_since_m04():
+    """业务路由统一挂 /api/v1；M04 起聚合 router 注册全部业务路由。"""
     from app.api.v1 import api_router
 
-    assert api_router.routes == []
+    assert api_router.routes != []
 
 
 def test_healthz_at_root_not_under_api_prefix(client):

@@ -179,7 +179,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现状态 | **✅ 已实现（2026-10）**：`decode_token`（alg 白名单防混淆、kid 匹配、过期/生效时间 now 注入、aud/iss 校验）+ `JwksCache`（TTL 缓存、启动预热失败不阻塞）+ `get_current_identity`/`get_db_session`（事务内 `SET LOCAL ROLE` + GUC 注入）全部落地；`casdoor_issuer` 支持容器内外地址分离。单测 `tests/unit/m03/` 32 用例（非法 token 全分支 401、JWKS TTL、RLS 转义）+ PG 集成 `test_m03_rls.py` 3 用例（组织只读隔离/组织内写入/跨组织写入拒绝）全绿；ruff/mypy 通过 |
 | 验收清单 | [x] 全部非法 token 分支抛 `AuthError` 且 401 [x] RLS 会话集成用例通过 |
 
-### M04 REST API
+### M04 REST API（✅ 已实现）
 
 | 项 | 内容 |
 |---|---|
@@ -189,7 +189,8 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | 分页参数统一；业务异常 → 3.1 映射；入队用 `send_task` 按队列名路由 |
 | 依赖 | M02 M03（M09 完成前 analysis 路由可返回 501 占位） |
 | 测试方案 | TestClient + `dependency_overrides` 替换 identity 与 repo（M02 未就绪时用 Mock）：参数校验 422、无 token 401、repo 业务异常 → 404/409、入队调用被记录 |
-| 验收清单 | [ ] OpenAPI 文档可访问 [ ] 每条路由至少 正常/鉴权失败/参数非法 三个用例 |
+| 实现状态 | **✅ 已实现（2026-10）**：路由表全部落地。`app/schemas/`（Page 泛型分页 + 五资源模型）、`app/services/enqueue.py`（`FetchTaskEnqueuer` 懒加载 Celery，`send_task` 按策略路由 fetch_api/fetch_browser/default，`countdown=1` 缓解先入队后提交竞态）；`/internal/fetch/callback/{task_id}` 挂根路径（X-Internal-Token 共享密钥，hmac 恒定时间比较），终态分流复用 M02 状态机；管理端 `mera-admin` 角色校验（403）、failed_exhausted 重触发按原业务键复用并入队；analysis 501 占位待 M09。注意：FastAPI 查询参数模型与标量 Query 参数混用不展开，`PageParams` 统一以 `Depends()` 注入。单测 `tests/unit/m04/` 49 用例（正常/401/403/422/404/409/入队记录/OpenAPI 全路径）全绿，全量单测 270 通过；ruff/mypy 通过；新增 `INTERNAL_API_TOKEN` 配置并接入 compose |
+| 验收清单 | [x] OpenAPI 文档可访问 [x] 每条路由至少 正常/鉴权失败/参数非法 三个用例 |
 
 ### M05 采集框架核心（五件套，✅ 已实现）
 

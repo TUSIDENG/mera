@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import and_, asc, func, select
+from sqlalchemy import ColumnElement, and_, asc, func, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from app.db.models import (
     InfrastructureCost,
     ModelSnapshot,
     SubscriptionPlan,
+    UserEvaluation,
 )
 from app.db.state_machine import ensure_terminal_rules, ensure_transition
 from app.repositories.dto import (
@@ -315,6 +316,148 @@ class Repository:
             .limit(1)
         )
         return self.session.scalar(stmt)
+
+    # --- M04 API 查询扩展 ---
+
+    def list_snapshots(
+        self, domain: str, *, limit: int, offset: int
+    ) -> tuple[list[ModelSnapshot], int]:
+        condition = ModelSnapshot.domain == domain
+        total = self.session.scalar(
+            select(func.count()).select_from(ModelSnapshot).where(condition)
+        )
+        stmt = (
+            select(ModelSnapshot)
+            .where(condition)
+            .order_by(ModelSnapshot.benchmark_score.desc(), asc(ModelSnapshot.model_id))
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
+
+    def snapshots_by_model(self, model_id: str) -> list[ModelSnapshot]:
+        stmt = (
+            select(ModelSnapshot)
+            .where(ModelSnapshot.model_id == model_id)
+            .order_by(asc(ModelSnapshot.domain))
+        )
+        return list(self.session.scalars(stmt).all())
+
+    def list_tasks(
+        self, *, status: str | None, limit: int, offset: int
+    ) -> tuple[list[FetchTask], int]:
+        condition = FetchTask.status == status if status else true()
+        total = self.session.scalar(
+            select(func.count()).select_from(FetchTask).where(condition)
+        )
+        stmt = (
+            select(FetchTask)
+            .where(condition)
+            .order_by(FetchTask.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
+
+    def list_plans(
+        self, *, provider: str | None, active_only: bool, limit: int, offset: int
+    ) -> tuple[list[SubscriptionPlan], int]:
+        condition: ColumnElement[bool] = true()
+        if provider:
+            condition = and_(condition, SubscriptionPlan.provider == provider)
+        if active_only:
+            condition = and_(condition, SubscriptionPlan.is_active.is_(True))
+        total = self.session.scalar(
+            select(func.count()).select_from(SubscriptionPlan).where(condition)
+        )
+        stmt = (
+            select(SubscriptionPlan)
+            .where(condition)
+            .order_by(asc(SubscriptionPlan.provider), asc(SubscriptionPlan.plan_key))
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
+
+    def get_plan(
+        self, provider: str, plan_key: str, billing_cycle: str
+    ) -> SubscriptionPlan | None:
+        stmt = select(SubscriptionPlan).where(
+            and_(
+                SubscriptionPlan.provider == provider,
+                SubscriptionPlan.plan_key == plan_key,
+                SubscriptionPlan.billing_cycle == billing_cycle,
+            )
+        )
+        return self.session.scalar(stmt)
+
+    def list_costs(
+        self, *, cost_type: str | None, limit: int, offset: int
+    ) -> tuple[list[InfrastructureCost], int]:
+        condition = (
+            InfrastructureCost.cost_type == cost_type if cost_type else true()
+        )
+        total = self.session.scalar(
+            select(func.count()).select_from(InfrastructureCost).where(condition)
+        )
+        stmt = (
+            select(InfrastructureCost)
+            .where(condition)
+            .order_by(asc(InfrastructureCost.cost_type), asc(InfrastructureCost.name))
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
+
+    def get_cost(
+        self, cost_type: str, name: str, region: str
+    ) -> InfrastructureCost | None:
+        stmt = select(InfrastructureCost).where(
+            and_(
+                InfrastructureCost.cost_type == cost_type,
+                InfrastructureCost.name == name,
+                InfrastructureCost.region == region,
+            )
+        )
+        return self.session.scalar(stmt)
+
+    def create_evaluation(
+        self,
+        *,
+        org_id: str,
+        user_id: str,
+        domain: str,
+        snapshot_used_ids: list[uuid.UUID],
+        data: dict,
+        fetch_task_id: uuid.UUID | None = None,
+    ) -> UserEvaluation:
+        evaluation = UserEvaluation(
+            org_id=org_id,
+            user_id=user_id,
+            domain=domain,
+            snapshot_used_ids=snapshot_used_ids,
+            data=data,
+            fetch_task_id=fetch_task_id,
+        )
+        self.session.add(evaluation)
+        self.session.flush()
+        return evaluation
+
+    def list_evaluations(
+        self, *, user_id: str, limit: int, offset: int
+    ) -> tuple[list[UserEvaluation], int]:
+        condition = UserEvaluation.user_id == user_id
+        total = self.session.scalar(
+            select(func.count()).select_from(UserEvaluation).where(condition)
+        )
+        stmt = (
+            select(UserEvaluation)
+            .where(condition)
+            .order_by(UserEvaluation.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
 
     def _transition(self, task_id: uuid.UUID, target: str) -> FetchTask:
         task = self._require_task(task_id)
