@@ -47,6 +47,28 @@ class BaseFetcher(ABC):
         """前置检查：依赖、密钥、会话/浏览器 profile 是否就绪。默认就绪。"""
         return True
 
+    def require_browser_session(self) -> bool:
+        """auth_required=browser_session 的方案在 is_available() 中调用：
+
+        校验 browser_session 配置与登录态（存在且未过 TTL），
+        不可用时写入 unavailable_reason（不含 cookie 值）并返回 False。
+        """
+        from app.core.exceptions import ConfigError
+        from app.fetchers.profiles import browser_session_available, parse_browser_session
+
+        try:
+            spec = parse_browser_session(self.cfg, site_key=self.site_key)
+        except ConfigError as exc:
+            self.unavailable_reason = str(exc)
+            return False
+        if spec is None:
+            self.unavailable_reason = "browser_session 未配置 storage_state"
+            return False
+        ok, reason = browser_session_available(spec)
+        if not ok:
+            self.unavailable_reason = reason
+        return ok
+
     @abstractmethod
     def fetch(self) -> Any:
         """采集本站，返回标准化前的原始记录；失败抛 FetchFailed/CaptchaRequired。"""

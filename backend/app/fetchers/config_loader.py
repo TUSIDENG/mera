@@ -106,6 +106,12 @@ def _validate_config(cfg: dict, key: str) -> None:
         raise ConfigError(
             f"站点 {key} 登录要求非法（须为 false/api_key/oauth_token/browser_session）"
         )
+    if cfg.get("auth_required") == "browser_session":
+        session = cfg.get("browser_session")
+        if not isinstance(session, dict) or not isinstance(session.get("storage_state"), str):
+            raise ConfigError(
+                f"站点 {key} 声明 browser_session 登录但缺 browser_session.storage_state"
+            )
     strategies = cfg.get("strategies")
     if not isinstance(strategies, list) or not strategies:
         raise ConfigError(f"站点 {key} strategies 必须是非空列表")

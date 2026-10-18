@@ -38,3 +38,7 @@ Thumbs.db
 # Local RPA and fetch outputs
 output/
 rpa-output/
+
+# 浏览器登录态与指纹 profile（等同密钥，禁止入库）
+profiles/
+storage_state.json

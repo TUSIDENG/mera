@@ -14,6 +14,7 @@ import requests
 
 from app.core.exceptions import FetchFailed
 from app.fetchers.base import BaseFetcher, collect_paginated_rows, parse_dom_rows
+from app.fetchers.profiles import new_context_kwargs
 
 _LOCAL_API_PROVIDERS = {"adspower", "bitbrowser"}
 
@@ -58,6 +59,8 @@ class Fetcher(BaseFetcher):
         if importlib.util.find_spec("playwright") is None:
             self.unavailable_reason = "未安装 playwright"
             return False
+        if self.cfg.get("auth_required") == "browser_session" and not self.require_browser_session():
+            return False
         fp = (self.cfg.get("playwright") or {}).get("fingerprint_browser") or {}
         if fp.get("enabled"):
             provider = fp.get("provider")
@@ -93,7 +96,9 @@ class Fetcher(BaseFetcher):
                     return collect_rows(page, pw_cfg)
             else:
                 browser = p.chromium.launch(headless=True)
-                context = browser.new_context()
+                context = browser.new_context(
+                    **new_context_kwargs(self.cfg, site_key=self.site_key)
+                )
                 page = context.new_page()
             page.goto(pw_cfg["url"], wait_until="networkidle")
             rows = collect_rows(page, pw_cfg)

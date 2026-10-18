@@ -179,6 +179,8 @@ services:
       - INFO
     volumes:
       - ./backend/app/fetchers/sites:/app/app/fetchers/sites:ro
+      # 浏览器登录态/Camoufox profile 命名卷（M06.2）：只读挂载，登录脚本经临时容器可写刷新
+      - browser_profiles:/var/mera/profiles:ro
     networks: [mera-net]
 
   # Celery Beat：定时采集调度（单实例，避免重复触发）
@@ -232,6 +234,7 @@ volumes:
   redis_data:
   casdoor_pg_data:
   beat_data:
+  browser_profiles:
 
 networks:
   mera-net:

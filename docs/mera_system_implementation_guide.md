@@ -287,6 +287,16 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 4. **指纹浏览器使用边界**：仅用于公开页面的强风控场景（如 LMArena、部分国内价格页），优先 Camoufox 容器化；AdsPower/BitBrowser 只在带桌面会话的专用节点启用。reCAPTCHA/hCaptcha、登录验证、付费墙一律转人工或停用该源。
 5. **首批落地建议**：先做 OpenRouter（API）、LiveCodeBench 或 Aider（公开数据/页面）、Artificial Analysis 或 Anthropic 定价（逆向结构化接口 + Playwright 兜底）、OpenAI 定价（Playwright/页面解析），确保覆盖 API、公开数据集、逆向、浏览器解析和无登录公开数据；随后补 LMArena 与云厂商价格。
 
+6. **登录态与指纹 profile 管理方案**（✅ 已实现，代码 `app/fetchers/profiles.py`）：三类资产分层管理——
+   - **密钥**（api_key/oauth token）：短字符串、无状态，只存 `env:XXX` 引用经环境变量注入（`signing.read_secret`）；生产可扩展 `vault:` 前缀，引用格式隔离无需改站点配置。
+   - **浏览器登录态**（storage_state.json）与 **Camoufox profile 目录**：命名卷 `browser_profiles` 挂容器 `/var/mera/profiles`（worker-2 **只读**），按站点目录 `profiles/<site_key>/` 存放；`config.yaml` 声明 `browser_session: {storage_state: profiles://<site_key>/storage_state.json, session_ttl_days: 30}`；`auth_required: browser_session` 但缺 `storage_state` 声明时 `load_site` 直接抛 `ConfigError`。
+   - **AdsPower/BitBrowser profile**：profile 存厂商云端/桌面端，本系统只持有 `profile_id` 引用（命名 `mera_<站点短名>_<序号>`），profile 文件不落地。
+   - **可用性判定**：`is_available()` 检查文件存在且 mtime 未超 TTL，不满足即 skipped（原因只写"缺失/过期"，不含 cookie 值）；普通 Chromium 上下文由 `new_context_kwargs()` 自动注入 `storage_state`。
+   - **登录工具**：`scripts/site_login.py <site_key> [--url] [--dir]`，headed Chromium 人工登录后写 `storage_state.json`（0600），一次性低频，不进 Celery 链路；**不做自动续期/密码代登录**（合规红线）。
+   - **失效闭环**：会话过期 → `is_available()=False` → skipped → M10 告警 → 管理员重跑登录脚本 → 下轮自动恢复。
+   - **安全红线**：卷只读挂载、文件 0600、`profiles/` 与 `storage_state.json` 已 gitignore；日志/skipped/异常只出现路径引用与 profile_id，绝不出现 cookie/token 值；测试与生产用不同卷与 env 注入。
+   - **刻意不做**：多账号 profile pool 轮换（需要时站点目录下加 `pool/` 即可扩展）、会话自动刷新、独立密钥服务（`vault:` 扩展点已预留）。
+
 ### M07 验证码处理
 
 | 项 | 内容 |
