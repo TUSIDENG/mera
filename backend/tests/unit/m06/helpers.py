@@ -24,19 +24,34 @@ def make_fetcher(key: str, strategy: str, **patches):
 
 
 class FakeElement:
-    """模拟 DOM 元素：inner_text + query_selector 协议。"""
+    """模拟 DOM 元素：inner_text + query_selector + get_attribute 协议。"""
 
     def __init__(
-        self, text: str | None = None, children: dict[str, FakeElement] | None = None
+        self,
+        text: str | None = None,
+        children: dict[str, FakeElement] | None = None,
+        attrs: dict[str, str] | None = None,
+        children_all: dict[str, list[FakeElement]] | None = None,
     ) -> None:
         self._text = text
         self._children = children or {}
+        self._attrs = attrs or {}
+        self._children_all = children_all or {}
 
     def inner_text(self) -> str | None:
         return self._text
 
+    def text_content(self) -> str | None:
+        return self._text
+
     def query_selector(self, selector: str) -> FakeElement | None:
         return self._children.get(selector)
+
+    def query_selector_all(self, selector: str) -> list[FakeElement]:
+        return list(self._children_all.get(selector, []))
+
+    def get_attribute(self, name: str) -> str | None:
+        return self._attrs.get(name)
 
 
 class FakeLocator:

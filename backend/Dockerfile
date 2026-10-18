@@ -17,11 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# 浏览器采集策略所需：Playwright + Chromium 及系统依赖
+# 浏览器采集策略所需：Playwright + Chromium 及系统依赖；Camoufox 指纹浏览器（LMArena 等强风控公开页）
 # 通过构建参数 INSTALL_PLAYWRIGHT=true 开启（docker-compose 本地部署默认开启）
 RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
-        pip install playwright \
-        && python -m playwright install --with-deps chromium; \
+        pip install playwright "camoufox[geoip]" \
+        && python -m playwright install --with-deps chromium \
+        && python -m playwright install-deps firefox \
+        && python -m camoufox fetch; \
     fi
 
 COPY . .

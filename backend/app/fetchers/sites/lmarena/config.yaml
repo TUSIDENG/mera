@@ -1,0 +1,32 @@
+# LMArena Chatbot Arena 人类偏好榜单：公开页面 + Cloudflare 强风控，Camoufox 指纹浏览器
+# 指纹浏览器仅用于公开页强风控场景（指南 M06.2 边界），不绕过登录/付费墙/验证码
+key: lmarena
+domain: chat # 人类偏好信号独立 domain，避免与 artificial_analysis 的 general 业务键互相覆盖
+data_type: model_metrics
+auth_required: false
+strategies: [playwright]
+rate_limit_per_min: 2
+compliance:
+  public_only: true
+  notes: 仅解析公开榜单页，低频访问，遵守站点条款；遇 reCAPTCHA/hCaptcha 一律转人工或停用
+playwright:
+  url: https://lmarena.ai/leaderboard
+  # 新站为 Next.js SSR 渲染（非 table、无数据 XHR）：榜单行为 figure 内含 span[title] 的容器
+  # 页面有多个 figure 区块（首个为主榜单，其余为次要榜单/隐藏副本），只解析首区块
+  section_selector: 'div[role="figure"]'
+  rows_selector: 'div:has(> span[title])'
+  # proxy: 缺省走 MERA_FETCH_PROXY 环境变量（默认 http://127.0.0.1:6789）；
+  # 支持 env:VAR 引用或直连地址，空字符串/none 禁用（Cloudflare 按 IP 封禁，机房出口基本必须代理）
+  goto_timeout_ms: 60000 # domcontentloaded（长连接页面不能用 networkidle）
+  ready_timeout_ms: 30000 # 等榜单行出现的上限
+  fingerprint_browser:
+    enabled: true
+    provider: camoufox
+    geoip: true # 走代理时按出口 IP 伪装时区/语言（camoufox[geoip]）
+normalize:
+  defaults:
+    provider: lmarena # vendor 缺失时回落站点名
+  fields:
+    model_id: model
+    provider: vendor
+    score: score

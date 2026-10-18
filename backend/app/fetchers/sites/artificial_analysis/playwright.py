@@ -15,6 +15,7 @@ import requests
 from app.core.exceptions import FetchFailed
 from app.fetchers.base import BaseFetcher, collect_paginated_rows, parse_dom_rows
 from app.fetchers.profiles import new_context_kwargs
+from app.fetchers.proxy import proxy_kwargs
 
 _LOCAL_API_PROVIDERS = {"adspower", "bitbrowser"}
 
@@ -91,11 +92,13 @@ class Fetcher(BaseFetcher):
             elif fp.get("enabled") and fp.get("provider") == "camoufox":
                 from camoufox.sync_api import Camoufox  # 延迟导入：camoufox 为可选依赖
 
-                with Camoufox(headless=bool(fp.get("headless", True))) as page:
+                with Camoufox(
+                    headless=bool(fp.get("headless", True)), **proxy_kwargs(self.cfg)
+                ) as page:
                     page.goto(pw_cfg["url"], wait_until="networkidle")
                     return collect_rows(page, pw_cfg)
             else:
-                browser = p.chromium.launch(headless=True)
+                browser = p.chromium.launch(headless=True, **proxy_kwargs(self.cfg))
                 context = browser.new_context(
                     **new_context_kwargs(self.cfg, site_key=self.site_key)
                 )

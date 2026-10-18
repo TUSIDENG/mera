@@ -25,6 +25,8 @@ x-backend-env: &backend-env
   CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:-}
   CASDOOR_ISSUER: http://localhost:8000
   INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+  # 采集代理（M06）：容器内访问宿主机本机代理客户端；站点 config.yaml playwright.proxy 可覆盖
+  MERA_FETCH_PROXY: ${MERA_FETCH_PROXY:-http://host.docker.internal:6789}
   FRONTEND_URL: http://localhost:3000
   MAX_FETCH_ATTEMPTS: "3"
   TZ: Asia/Shanghai

@@ -216,7 +216,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | 异常分类：HTTP 4xx/超时/坏 JSON → `FetchFailed`；响应体 `code=CAPTCHA_REQUIRED` → `CaptchaRequired`；限频 sleep 经注入；指纹浏览器按 config `provider`（adspower/bitbrowser 经 Local API + CDP；camoufox 进程内；详见采集指南 4.1）。**选择路线原则**：官方 API/公开 JSON/CSV > 前端逆向接口 > Playwright DOM > 指纹浏览器；后两者只在公开数据无法用前两种稳定获取时使用。需要登录的站点必须显式声明并复用授权会话；没有授权凭据时方案 `is_available()=False`，由 M05 跳过，不做账号破解、不绕过付费/隐私墙 |
 | 依赖 | M05 |
 | 测试方案 | `responses/respx` 注册 200/403/超时/坏 JSON/验证码响应 → 断言异常类型与 RequestSpec 内容（secret 不出现）；假 `page` 对象（Mock(spec=Page) 返回预制元素）测 parse_dom 与分页循环终止；指纹 Local API 用 responses mock start/stop；缺少 API Key/session/profile 时断言方案被标记为 skipped，而不是失败或发起网络请求 |
-| 实现状态 | **✅ 首批已实现（2026-10）**：3 个站点覆盖三类路线——openrouter（官方 API）、artificial_analysis（逆向接口 + Playwright 兜底）、aider_leaderboard（Playwright 公开表格），明细见 M06.1 进度表。单测 `tests/unit/m06/`（站点配置冒烟 + 各站点方案共五组）：`responses` mock 全部 HTTP（200/403/超时/坏 JSON/验证码）、假 `page` 对象测 DOM 解析与翻页终止、指纹浏览器 Local API start/stop mock、密钥/会话缺失断言 skipped 且不发起请求 |
+| 实现状态 | **✅ 首批已实现（2026-10）**：4 个站点覆盖四类路线——openrouter（官方 API）、artificial_analysis（逆向接口 + Playwright 兜底）、aider_leaderboard（Playwright 公开表格）、lmarena（Camoufox 指纹浏览器公开强风控页），明细见 M06.1 进度表。单测 `tests/unit/m06/`（站点配置冒烟 + 各站点方案共六组）：`responses` mock 全部 HTTP（200/403/超时/坏 JSON/验证码）、假 `page` 对象测 DOM 解析与翻页终止、指纹浏览器 Local API start/stop mock、密钥/会话缺失断言 skipped 且不发起请求；camoufox 不进 dev 依赖，可用性用例经 `find_spec` 补丁验证 |
 | 验收清单 | [x] 首批至少 3 个站点：1 个官方/公开数据、1 个逆向接口、1 个 Playwright/指纹兜底跑通 [x] 每站点单测覆盖请求构造+解析+异常分支+会话缺失跳过 [x] `config.yaml` 明确登录要求与实际采用路线 |
 
 #### M06.1 首批站点/数据源目录（P1 建议实现，可按可访问性裁剪）
@@ -231,7 +231,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | Artificial Analysis | A 榜单 | ✅ 已实现 | `strategies: [reverse_api, playwright]`。reverse_api 为主：逆向前端结构化接口，HMAC-MD5 签名（sorted 参数 + timestamp），密钥 `env:AA_SECRET` 不进请求参数、缺失时 `is_available()=False` 由 M05 记 skipped 后自动降级；`parse_response` 返回 `(records, has_more, truncated)` 三元组区分服务端截断与翻页。playwright 兜底：公开榜单页表格解析 + 翻页，可选指纹浏览器（`fingerprint_browser.provider` 支持 camoufox/adspower/bitbrowser，默认关闭） |
 | Aider Leaderboard | A 编程榜单 | ✅ 已实现 | `strategies: [playwright]`：公开页面 HTML 表格解析（`auth_required: false`），单页榜单无翻页（`next_selector: null`），`domain: coding`，provider 缺省回填 `aider`；`parse_dom` 纯函数 + 假 page 单测 |
 | LiveCodeBench | A 编程榜单 | ⬜ 待实现 | 规划路线：HF/GitHub 公开数据集文件；新增站点目录即可，框架零改动 |
-| LMArena / Chatbot Arena | A 榜单 | ⬜ 待实现 | 规划路线：前端 XHR 逆向 → Playwright/指纹兜底；触发验证码转 M07 |
+| LMArena / Chatbot Arena | A 榜单 | ✅ 已实现（2026-10 经代理实跑验证） | `strategies: [playwright]`：Camoufox 指纹浏览器（`fingerprint_browser.provider: camoufox`，指南 M06.2 强风控公开页场景）；新站为 Next.js SSR 直出（非 table、无数据 XHR，数据直接渲染在 HTML），榜单行 = figure 区块内含 `span[title]` 的容器，模型名取 title 属性防截断、厂商取 svg `<title>`；页面含多个 figure 区块（首区块为主榜单，其余为次要榜单/隐藏副本），`section_selector` 限定首区块解析并按模型名去重；Cloudflare 按 IP 封禁机房出口，**必须走采集代理**（三级解析：站点 `playwright.proxy` 支持 `env:` 引用 > 环境变量 `MERA_FETCH_PROXY` > 默认 `http://127.0.0.1:6789`，空串/`none` 禁用，三个 playwright 方案统一接入；compose 注入 `http://host.docker.internal:6789` 访问宿主机代理客户端）；长连接页面用 `domcontentloaded` + `wait_for_selector`（`networkidle` 永不满足）；`domain: chat` 独立 domain 不与 AA `general` 业务键互覆；vendor 缺失行（部分模型 svg 无 title）provider 回落 `lmarena`；无普通 Chromium 降级（风控下不可用），camoufox 未装时 `is_available()=False` 记 skipped；验证码一律转 M07/人工。实跑结果：经代理抓回主榜单 Top10 并标准化为 10 条 SnapshotRecord |
 | Vellum / OpenCompass / SuperCLUE / HF Open LLM | A 榜单 | ⬜ 待实现 | 规划路线见下表 A；优先公开发布的数据文件 |
 | OpenAI / Anthropic / Google 定价页 | B 价格/套餐 | ⬜ 待实现 | 规划路线见下表 B；账号内合同价不自动采集 |
 | 国内厂商（DeepSeek/Kimi/GLM/百炼/千帆等） | B 价格 | ⬜ 待实现 | 规划路线：官方价格页/公开 JSON → Playwright |
@@ -239,7 +239,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 订阅套餐页（Plus/Pro/Max 等） | B 订阅套餐 | ⬜ 待实现 | 以管理员录入为主，采集仅作补充 |
 | X / Reddit / HN / PH / YouTube | C 舆情信号 | ⬜ 待实现（P2 可选） | 仅官方 API 授权路线；未配置凭据时 `is_available()=False` 跳过 |
 
-> 已实现的 3 个站点对应下表 A/B 中的 P0/P1 行；其余行保持规划口径不变，实施时按"新增站点目录 + config.yaml 声明"接入，`app/fetchers/` 框架代码零改动。
+> 已实现的 4 个站点对应下表 A/B 中的 P0/P1 行；其余行保持规划口径不变，实施时按"新增站点目录 + config.yaml 声明"接入，`app/fetchers/` 框架代码零改动。
 
 ##### A. 模型与编程能力榜单
 

@@ -9,6 +9,7 @@ import importlib.util
 from typing import Any
 
 from app.fetchers.base import BaseFetcher, collect_paginated_rows, parse_dom_rows
+from app.fetchers.proxy import proxy_kwargs
 
 
 def parse_dom(rows: list[Any], fields: dict[str, str]) -> list[dict]:
@@ -35,7 +36,7 @@ class Fetcher(BaseFetcher):
 
         pw_cfg = self.cfg["playwright"]
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, **proxy_kwargs(self.cfg))
             try:
                 context = browser.new_context(
                     user_agent="MERA-Fetcher/1.0 (+https://github.com/mera-project)",
