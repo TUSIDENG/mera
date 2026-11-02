@@ -92,9 +92,12 @@ class Fetcher(BaseFetcher):
             elif fp.get("enabled") and fp.get("provider") == "camoufox":
                 from camoufox.sync_api import Camoufox  # 延迟导入：camoufox 为可选依赖
 
+                # Camoufox 的 __enter__ 返回 Browser 或 BrowserContext，两者均可 new_page()；
+                # 不复用 page 变量名，避免与上方分支推断出的 Page 类型冲突
                 with Camoufox(
                     headless=bool(fp.get("headless", True)), **proxy_kwargs(self.cfg)
-                ) as page:
+                ) as fox_browser:
+                    page = fox_browser.new_page()
                     page.goto(pw_cfg["url"], wait_until="networkidle")
                     return collect_rows(page, pw_cfg)
             else:
