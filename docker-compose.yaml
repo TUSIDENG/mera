@@ -45,7 +45,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # postgres:18+ 镜像采用 pg_ctlcluster 布局（/var/lib/postgresql/<major>/docker），需挂载父目录
+      - pg_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mera -d mera"]
       interval: 10s
@@ -208,6 +209,10 @@ services:
     image: mera/frontend:latest
     container_name: mera-frontend
     restart: unless-stopped
+    environment:
+      # 浏览器侧 Casdoor OIDC 配置（容器启动时写入 /config.js）
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:-}
+      CASDOOR_BROWSER_ENDPOINT: ${CASDOOR_BROWSER_ENDPOINT:-http://localhost:8000}
     depends_on:
       - backend-app
     ports:

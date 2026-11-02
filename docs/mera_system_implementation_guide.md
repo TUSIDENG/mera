@@ -319,7 +319,8 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | 路由：含浏览器策略 → `fetch_browser`（worker-2），API/逆向 → `fetch_api`（worker-1），两者都消费 `default` 互为冗余；autoretry max=3 指数退避（与 M05 熔断一致） |
 | 依赖 | M05 M06 M02 |
 | 测试方案 | `task_always_eager=True` + fakeredis：断言 routing_key、eager 执行触发注入的 orchestrator/repo、重试计数、beat 计划与站点配置一致 |
-| 验收清单 | [ ] eager 全链路单测通过 [ ] 队列路由用例通过 |
+| 验收清单 | [x] eager 全链路单测通过 [x] 队列路由用例通过 |
+| 实现状态 | **✅ 已实现（2026-11）**：`app/worker.py`（celery_app，broker/backend 取自 Settings，task_routes 兜底 default，显式导入任务模块）+ `app/tasks/fetch.py`（`run_fetch_task(task_id)`：读任务 → `load_site` → `select_site_strategies` 纯函数裁剪策略链 → `RepoTaskHandle` 交 M05 `run_fetch`（落库在 run_fetch 内部），异常兜底按状态机标记、不裸抛防 broker 无限重投）。站点配置尚无调度字段，beat_schedule 暂为空。单测 `tests/unit/m08/` 14 用例，全量单测 341 绿，ruff 通过 |
 
 ### M09 选型分析引擎（业务核心，纯函数）
 
@@ -355,7 +356,8 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 实现要点 | **组件层用 shadcn/ui + Tailwind CSS**：组件源码拷贝进 `components/ui/`（Radix 原语），样式走 Tailwind + CSS 变量主题（class 策略暗色模式），可自由改不依赖库版本升级；**表格逻辑用 TanStack Table**（榜单排序/分页/筛选在 `useLeaderboardTable` 等 hook 中实现，UI 只渲染 columns），**表单用 react-hook-form + zod**（schema 与后端 pydantic 字段对齐），**图表用 Recharts** 封装单一 `<Chart option/data>` 组件（榜单趋势折线、对比雷达、TCO 堆叠柱状）；图标 lucide-react、Toast 用 sonner；不引入第二套组件库（antd 作为备选：仅当后续页面膨胀、需要开箱即用的重型表格/表单时再评估）。API client 层统一封装（token 注入/401 跳转）；评分展示直接消费 M09 输出结构 |
 | 依赖 | M04 |
 | 测试方案 | Vitest + Testing Library；MSW mock `/api` 响应；组件测：榜单 Table 渲染/排序（断言自己实现的 hook 逻辑 + `data-testid`，Radix 交互用 `userEvent` 驱动）、表单校验（zod schema 纯函数直测）、`<Chart>` mock Recharts 实例只断言收到正确数据；store reducer 单测 |
-| 验收清单 | [ ] 核心页面组件单测通过 [ ] MSW 下无真实网络请求 |
+| 验收清单 | [x] 核心页面组件单测通过 [x] MSW 下无真实网络请求 |
+| 实现状态 | **✅ 已实现（2026-11）**：`frontend/`（React 18 + Vite + TS + Tailwind + shadcn 风格组件 + zustand + TanStack Table + RHF/zod + Recharts + sonner）。OIDC 授权码 + PKCE 纯前端实现（`lib/oidc.ts`，token 存 sessionStorage），运行时配置 `window.MERA_CONFIG` 由容器 entrypoint 生成 `/config.js`；nginx 反代 `/api/` 并 SPA fallback。页面：/login、/callback、/leaderboard（domain tabs + 排序分页）、/models/:id（历史折线）、/compare（雷达）、/costs（套餐表）、/tasks（10s 轮询 + 触发采集表单）。单测 26 用例全绿，`npm run build` 与镜像构建通过；compose 全栈 E2E：OIDC 登录 → 触发 openrouter 采集 → 榜单展示 452 条快照 |
 
 ### M12 部署与 CI
 
@@ -400,5 +402,5 @@ P2 能出结论
   [ ] M10 通知
   [ ] POST /analysis/run 端到端
 P3 可视化
-  [ ] M11 五页面 + 组件单测
+  [x] M11 五页面 + 组件单测
 ```
