@@ -73,11 +73,14 @@ class BaseFetcher(ABC):
     def fetch(self) -> Any:
         """采集本站，返回标准化前的原始记录；失败抛 FetchFailed/CaptchaRequired。"""
 
-    def normalize(self, raw: Any) -> tuple[list[Any], bool]:
-        """默认回退到通用 normalize；站点可覆盖。返回 (records, truncated)。"""
+    def normalize(self, raw: Any, *, data_type: str | None = None) -> tuple[list[Any], bool]:
+        """默认回退到通用 normalize；站点可覆盖。返回 (records, truncated)。
+
+        data_type 为任务级数据类型（缺省取站点配置 data_type），决定产出 DTO 类型。
+        """
         from app.fetchers.normalize import normalize_records
 
-        records, truncated = normalize_records(raw, self.cfg)
+        records, truncated = normalize_records(raw, self.cfg, data_type=data_type)
         return records, (truncated or self.truncated)
 
 

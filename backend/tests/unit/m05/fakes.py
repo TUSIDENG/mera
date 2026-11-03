@@ -37,7 +37,7 @@ class FakeFetcher(BaseFetcher):
             raise self._error
         return self._records
 
-    def normalize(self, raw: Any) -> tuple[list[Any], bool]:
+    def normalize(self, raw: Any, *, data_type: str | None = None) -> tuple[list[Any], bool]:
         return list(raw), self.truncated
 
 
@@ -100,6 +100,9 @@ class MockRepo:
         return self.hit_count
 
     def upsert_snapshots(self, records: list[Any]) -> int:
+        return self._record(records)
+
+    def upsert_prices(self, records: list[Any]) -> int:
         return self._record(records)
 
     def upsert_costs(self, records: list[Any]) -> int:

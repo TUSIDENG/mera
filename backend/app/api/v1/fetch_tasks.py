@@ -7,7 +7,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.api.depends import get_current_identity, get_enqueuer, get_repository
+from app.core.exceptions import AppError, ConfigError
 from app.core.security import Identity
+from app.fetchers.config_loader import SITES_DIR, site_data_types
 from app.repositories.dto import CreateTaskParams
 from app.repositories.repository import Repository
 from app.schemas.common import Page, PageParams
@@ -24,7 +26,22 @@ def create_fetch_task(
     repo: Annotated[Repository, Depends(get_repository)],
     enqueuer: Annotated[FetchTaskEnqueuer, Depends(get_enqueuer)],
 ) -> FetchTaskOut:
-    """手动触发采集；相同业务键存在进行中任务时复用（M02 语义），返回 202。"""
+    """手动触发采集；相同业务键存在进行中任务时复用（M02 语义），返回 202。
+
+    task_type 必须在站点 config.yaml 声明的 data_types 内（如 openrouter 支持
+    model_metrics/api_price），防止「成本任务跑出榜单数据」这类语义错配。
+    """
+    try:
+        allowed_types = site_data_types(SITES_DIR, body.source_key)
+    except ConfigError as exc:
+        raise AppError(str(exc), code="unknown_source", status_code=422) from exc
+    if body.task_type not in allowed_types:
+        raise AppError(
+            f"站点 {body.source_key} 不支持任务类型 {body.task_type}，"
+            f"可选: {', '.join(allowed_types)}",
+            code="invalid_task_type",
+            status_code=422,
+        )
     task = repo.create_task(
         CreateTaskParams(
             task_type=body.task_type,

@@ -12,7 +12,26 @@ class SnapshotRecord:
     model_id: str
     provider: str
     domain: str
-    benchmark_score: Decimal
+    # 主榜分可空：None 表示该来源没有任何可用维度分（区别于真 0 分）
+    benchmark_score: Decimal | None
+    # 各维度原始分（JSONB 存储，值为 float/None）与主榜分来源维度
+    scores: dict[str, float | None] = field(default_factory=dict)
+    score_source: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ApiPriceRecord:
+    """模型 API 按量价格（每 unit 单价，默认每 token）；与榜单快照分表。"""
+
+    model_id: str
+    provider: str
+    input_price: Decimal | None = None
+    output_price: Decimal | None = None
+    currency: str = "USD"
+    unit: str = "token"
+    is_active: bool = True
+    source: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
 

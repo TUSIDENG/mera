@@ -1,8 +1,10 @@
 # Artificial Analysis 榜单：逆向前端结构化接口为主，Playwright 表格解析兜底
 # 密钥缺失时 reverse_api 方案 is_available()=False，由编排层记录 skipped 后走 playwright
 key: artificial_analysis
+label: Artificial Analysis
 domain: general
 data_type: model_metrics
+data_types: [model_metrics]
 auth_required: api_key
 strategies: [reverse_api, playwright]
 rate_limit_per_min: 10
@@ -19,11 +21,12 @@ reverse_api:
     sign_param: sign
 playwright:
   url: https://artificialanalysis.ai/leaderboards/models
-  rows_selector: "table.leaderboard tbody tr"
+  # 实测页面仅一张 table（无 .leaderboard 类）；列序：1=模型 2=上下文 3=厂商 4=Intelligence 分
+  rows_selector: "table tbody tr"
   next_selector: "button.next-page"
   fields:
     model: "td:nth-child(1)"
-    score: "td:nth-child(2)"
+    score: "td:nth-child(4)"
     provider: "td:nth-child(3)"
   fingerprint_browser:
     enabled: false # 强风控时开启；camoufox 进程内，adspower/bitbrowser 经 Local API + CDP

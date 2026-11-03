@@ -5,10 +5,21 @@ M04：models / fetch-tasks / evaluations / subscription-plans / analysis / admin
 """
 from fastapi import APIRouter
 
-from app.api.v1 import admin, analysis, evaluations, fetch_tasks, models, plans
+from app.api.v1 import (
+    admin,
+    analysis,
+    evaluations,
+    fetch_tasks,
+    models,
+    plans,
+    prices,
+    sites,
+)
 
 api_router = APIRouter()
 api_router.include_router(models.router)
+api_router.include_router(sites.router)
+api_router.include_router(prices.router)
 api_router.include_router(fetch_tasks.router)
 api_router.include_router(evaluations.router)
 api_router.include_router(plans.router)

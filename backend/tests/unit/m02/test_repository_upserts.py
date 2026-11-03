@@ -10,13 +10,67 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.enums import CostType
-from app.db.models import InfrastructureCost, ModelSnapshot, SubscriptionPlan
+from app.db.models import (
+    InfrastructureCost,
+    ModelSnapshot,
+    SubscriptionPlan,
+)
 from app.repositories import (
     CostRecord,
     Repository,
     SnapshotRecord,
     SubscriptionPlanRecord,
 )
+from app.repositories.dto import ApiPriceRecord
+from app.repositories.repository import _dedupe_for_upsert
+
+
+def test_dedupe_for_upsert_last_wins() -> None:
+    """同业务键去重，后写覆盖先写（PG 批量 ON CONFLICT 不允许同命令两次命中同行）。"""
+    records = [
+        SnapshotRecord(model_id="m", provider="p", domain="d",
+                       benchmark_score=Decimal("1.0"), data={"v": 1}),
+        SnapshotRecord(model_id="other", provider="p", domain="d",
+                       benchmark_score=Decimal("2.0")),
+        SnapshotRecord(model_id="m", provider="p", domain="d",
+                       benchmark_score=Decimal("3.0"), data={"v": 3}),
+    ]
+    deduped = _dedupe_for_upsert(records)
+    assert len(deduped) == 2
+    by_id = {record.model_id: record for record in deduped}
+    assert by_id["m"].benchmark_score == Decimal("3.0")
+    assert by_id["m"].data == {"v": 3}
+    assert by_id["other"].benchmark_score == Decimal("2.0")
+
+
+def test_upsert_prices_roundtrip(db_session: Session) -> None:
+    repo = Repository(db_session)
+    repo.upsert_prices([
+        ApiPriceRecord(
+            model_id="openai/gpt-5",
+            provider="openrouter",
+            input_price=Decimal("0.00000075"),
+            output_price=Decimal("0.0000045"),
+            source="openrouter",
+        )
+    ])
+    db_session.commit()
+    repo.upsert_prices([
+        ApiPriceRecord(
+            model_id="openai/gpt-5",
+            provider="openrouter",
+            input_price=Decimal("0.000001"),
+            source="openrouter",
+        )
+    ])
+    db_session.commit()
+    prices = repo.latest_prices()
+    assert len(prices) == 1
+    assert prices[0].input_price == Decimal("0.000001")
+    assert prices[0].output_price is None
+    assert prices[0].unit == "token"
+    assert repo.get_price("openai/gpt-5", "openrouter") is not None
+    assert repo.get_price("openai/gpt-5", "other") is None
 
 
 def test_upsert_snapshots_is_idempotent_and_updates_values(db_session: Session) -> None:

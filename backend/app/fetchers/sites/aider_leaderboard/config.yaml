@@ -1,5 +1,6 @@
 # Aider LLM 代码编辑榜单：公开页面 HTML，Playwright 解析表格（无需登录）
 key: aider_leaderboard
+label: Aider Leaderboard
 domain: coding
 data_type: model_metrics
 auth_required: false

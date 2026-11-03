@@ -1,8 +1,11 @@
-"""M04 分析路由：调用 M09 纯函数引擎产出加权排名。"""
+"""M04 分析路由：调用 M09 纯函数引擎产出加权排名。
+
+价格从 model_api_prices 表按 (model_id, provider) 关联（与榜单分表后不再读
+snapshot.data）；无榜分的模型不参与排名。
+"""
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -17,16 +20,6 @@ from app.scoring.models import ModelInput, RankInputs, Weights
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 
-def _price(value: object) -> Decimal | None:
-    """快照 data 中的每 token 单价为字符串；缺省或非法时返回 None，由引擎按缺项处理。"""
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except InvalidOperation:
-        return None
-
-
 def _display_name(value: object) -> str | None:
     """展示名统一转字符串；缺省返回 None。"""
     return None if value is None else str(value)
@@ -38,19 +31,26 @@ def run_analysis(
     identity: Annotated[Identity, Depends(get_current_identity)],
     repo: Annotated[Repository, Depends(get_repository)],
 ) -> AnalysisRunResponse:
-    """读取 domain 最新快照并返回排名；DB 读取只留在本路由层，引擎零 I/O。"""
+    """读取 domain 最新快照与 API 价格表并返回排名；DB 读取只留在本路由层。"""
     _ = identity
-    models = [
-        ModelInput(
-            model_id=snapshot.model_id,
-            provider=snapshot.provider,
-            benchmark_score=snapshot.benchmark_score,
-            input_price=_price(snapshot.data.get("input_price")),
-            output_price=_price(snapshot.data.get("output_price")),
-            display_name=_display_name(snapshot.data.get("display_name")),
+    prices = {
+        (price.model_id, price.provider): price for price in repo.latest_prices()
+    }
+    models = []
+    for snapshot in repo.latest_snapshots(payload.domain):
+        if snapshot.benchmark_score is None:
+            continue  # 无分模型不参与加权排名（区别于 0 分）
+        price = prices.get((snapshot.model_id, snapshot.provider))
+        models.append(
+            ModelInput(
+                model_id=snapshot.model_id,
+                provider=snapshot.provider,
+                benchmark_score=snapshot.benchmark_score,
+                input_price=price.input_price if price is not None else None,
+                output_price=price.output_price if price is not None else None,
+                display_name=_display_name(snapshot.data.get("display_name")),
+            )
         )
-        for snapshot in repo.latest_snapshots(payload.domain)
-    ]
     ranked = rank_models(
         RankInputs(
             models=models,

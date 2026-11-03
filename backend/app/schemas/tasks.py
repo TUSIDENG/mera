@@ -12,9 +12,14 @@ FetchStrategy = Literal["api", "reverse_api", "playwright"]
 
 
 class FetchTaskCreate(BaseModel):
-    """手动触发采集：task_type/domain 与 M02 业务键一致；strategy 缺省由编排层自动降级。"""
+    """手动触发采集：task_type/domain 与 M02 业务键一致；strategy 缺省由编排层自动降级。
 
-    task_type: Literal["model_metrics", "infrastructure_cost"]
+    task_type 必须在目标站点 config.yaml 声明的 data_types 内（路由层校验）。
+    """
+
+    task_type: Literal[
+        "model_metrics", "infrastructure_cost", "api_price", "subscription_plan"
+    ]
     source_key: str = Field(min_length=1, max_length=80)
     domain: str | None = Field(default=None, max_length=50)
     fetch_strategy: FetchStrategy | None = None

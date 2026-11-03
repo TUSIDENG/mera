@@ -1,6 +1,7 @@
 # LMArena Chatbot Arena 人类偏好榜单：公开页面 + Cloudflare 强风控，Camoufox 指纹浏览器
 # 指纹浏览器仅用于公开页强风控场景（指南 M06.2 边界），不绕过登录/付费墙/验证码
 key: lmarena
+label: LMArena
 domain: chat # 人类偏好信号独立 domain，避免与 artificial_analysis 的 general 业务键互相覆盖
 data_type: model_metrics
 auth_required: false

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-BillingCycleStr = Literal["monthly", "yearly"]
+BillingCycleStr = Literal["monthly", "yearly", "one_off"]
 CostTypeStr = Literal[
     "gpu_rental", "gpu_purchase", "cpu", "electricity", "colocation", "bandwidth"
 ]
@@ -61,5 +61,35 @@ class CostPut(BaseModel):
 
     unit: str = Field(min_length=1, max_length=30)
     unit_price: Decimal = Field(ge=0)
+    is_active: bool = True
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class PriceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    model_id: str
+    provider: str
+    input_price: Decimal | None
+    output_price: Decimal | None
+    currency: str
+    unit: str
+    source: str
+    is_active: bool
+    data: dict[str, Any]
+    updated_at: datetime
+
+
+class PricePut(BaseModel):
+    """管理端 API 价格 upsert（业务键 model_id+provider 由路径携带）。
+
+    价格为每 unit（默认 token）单价；input/output 至少给一个。
+    """
+
+    input_price: Decimal | None = Field(default=None, ge=0)
+    output_price: Decimal | None = Field(default=None, ge=0)
+    currency: str = Field(default="USD", max_length=8)
+    unit: str = Field(default="token", max_length=30)
     is_active: bool = True
     data: dict[str, Any] = Field(default_factory=dict)

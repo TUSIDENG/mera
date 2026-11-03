@@ -22,6 +22,7 @@ from app.db.enums import FetchTaskStatus
 from app.db.models import (
     FetchTask,
     InfrastructureCost,
+    ModelApiPrice,
     ModelSnapshot,
     SubscriptionPlan,
     UserEvaluation,
@@ -43,11 +44,31 @@ def make_snapshot(**overrides: Any) -> ModelSnapshot:
         "provider": "openai",
         "domain": "coding",
         "benchmark_score": Decimal("95.50"),
+        "scores": {},
+        "score_source": None,
         "data": {},
         "updated_at": NOW,
     }
     values.update(overrides)
     return ModelSnapshot(**values)
+
+
+def make_price(**overrides: Any) -> ModelApiPrice:
+    values: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "model_id": "gpt-4o",
+        "provider": "openai",
+        "input_price": Decimal("0.000003"),
+        "output_price": Decimal("0.000015"),
+        "currency": "USD",
+        "unit": "token",
+        "source": "manual",
+        "is_active": True,
+        "data": {},
+        "updated_at": NOW,
+    }
+    values.update(overrides)
+    return ModelApiPrice(**values)
 
 
 def make_task(**overrides: Any) -> FetchTask:
@@ -129,6 +150,7 @@ class FakeRepo:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.task: FetchTask | None = make_task()
         self.snapshots: list[ModelSnapshot] = [make_snapshot()]
+        self.prices: list[ModelApiPrice] = [make_price()]
         self.plans: list[SubscriptionPlan] = [make_plan()]
         self.costs: list[InfrastructureCost] = [make_cost()]
         self.evaluations: list[UserEvaluation] = [make_evaluation()]
@@ -149,6 +171,30 @@ class FakeRepo:
     def latest_snapshots(self, domain: str):
         self._log("latest_snapshots", domain=domain)
         return self.snapshots
+
+    def latest_prices(self):
+        self._log("latest_prices")
+        return [price for price in self.prices if price.is_active]
+
+    def get_price(self, model_id: str, provider: str):
+        self._log("get_price", model_id=model_id, provider=provider)
+        for price in self.prices:
+            if price.model_id == model_id and price.provider == provider:
+                return price
+        return None
+
+    def list_prices(self, *, provider: str | None, model_id: str | None, limit: int, offset: int):
+        self._log("list_prices", provider=provider, model_id=model_id, limit=limit, offset=offset)
+        items = self.prices
+        if provider:
+            items = [price for price in items if price.provider == provider]
+        if model_id:
+            items = [price for price in items if price.model_id == model_id]
+        return items, len(items)
+
+    def upsert_prices(self, records: Any):
+        self._log("upsert_prices", records=list(records))
+        return len(records)
 
     def list_tasks(self, *, status: str | None, limit: int, offset: int):
         self._log("list_tasks", status=status, limit=limit, offset=offset)

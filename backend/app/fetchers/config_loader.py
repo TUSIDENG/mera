@@ -17,7 +17,7 @@ import yaml
 
 from app.core.exceptions import ConfigError
 from app.fetchers.base import BaseFetcher
-from app.fetchers.normalize import DATA_TYPES
+from app.fetchers.normalize import DATA_TYPES, _clean_str
 
 SITES_DIR = Path(__file__).parent / "sites"
 
@@ -33,6 +33,17 @@ AUTH_REQUIRED_VALUES = {False, "api_key", "oauth_token", "browser_session"}
 
 
 @dataclass
+class SiteMeta:
+    """站点元数据（不实例化方案，供前端站点列表/任务类型联动使用）。"""
+
+    key: str
+    label: str
+    domain: str | None
+    data_type: str
+    data_types: tuple[str, ...]
+
+
+@dataclass
 class SiteConfig:
     """一个站点的已校验配置与按声明顺序实例化的方案链。"""
 
@@ -40,6 +51,7 @@ class SiteConfig:
     path: Path
     cfg: dict[str, Any]
     data_type: str
+    data_types: tuple[str, ...]
     domain: str | None
     strategies: list[str]
     fetchers: list[tuple[str, BaseFetcher]] = field(default_factory=list)
@@ -64,24 +76,15 @@ def discover_sites(sites_dir: str | Path = SITES_DIR) -> list[str]:
 
 def load_site(sites_dir: str | Path, key: str) -> SiteConfig:
     """加载并校验单个站点配置，实例化声明且已实现的方案。"""
+    cfg = read_site_cfg(sites_dir, key)
     site_dir = Path(sites_dir) / key
-    config_path = site_dir / "config.yaml"
-    if not config_path.is_file():
-        raise ConfigError(f"站点配置不存在: {key}")
-    try:
-        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"站点配置 YAML 解析失败: {key}") from exc
-    if not isinstance(cfg, dict):
-        raise ConfigError(f"站点配置必须是映射结构: {key}")
-
-    _validate_config(cfg, key)
 
     site = SiteConfig(
         key=key,
         path=site_dir,
         cfg=cfg,
         data_type=cfg["data_type"],
+        data_types=_resolve_data_types(cfg, key),
         domain=cfg.get("domain"),
         strategies=list(cfg["strategies"]),
     )
@@ -93,6 +96,74 @@ def load_site(sites_dir: str | Path, key: str) -> SiteConfig:
         fetcher = _instantiate_fetcher(module_file, key, strategy, cfg)
         site.fetchers.append((strategy, fetcher))
     return site
+
+
+def read_site_cfg(sites_dir: str | Path, key: str) -> dict[str, Any]:
+    """读取并校验单个站点的 config.yaml（不实例化方案，供 API 层轻量校验用）。"""
+    config_path = Path(sites_dir) / key / "config.yaml"
+    if not config_path.is_file():
+        raise ConfigError(f"站点配置不存在: {key}")
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"站点配置 YAML 解析失败: {key}") from exc
+    if not isinstance(cfg, dict):
+        raise ConfigError(f"站点配置必须是映射结构: {key}")
+    _validate_config(cfg, key)
+    return cfg
+
+
+def site_data_types(sites_dir: str | Path, key: str) -> tuple[str, ...]:
+    """站点声明支持的数据类型集合（任务类型校验用）。"""
+    cfg = read_site_cfg(sites_dir, key)
+    return _resolve_data_types(cfg, key)
+
+
+def list_sites(sites_dir: str | Path) -> list[SiteMeta]:
+    """枚举 sites 目录下所有合法站点的元数据，按 key 排序。"""
+    root = Path(sites_dir)
+    if not root.is_dir():
+        return []
+    sites: list[SiteMeta] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("_") or entry.name.startswith("."):
+            continue
+        config_path = entry / "config.yaml"
+        if not config_path.is_file():
+            continue
+        try:
+            cfg = read_site_cfg(root, entry.name)
+        except ConfigError:
+            # 配置非法的站点在列表中直接跳过（不影响其它站点）
+            continue
+        label = _clean_str(cfg.get("label")) or entry.name.replace("_", " ").title()
+        sites.append(
+            SiteMeta(
+                key=entry.name,
+                label=label,
+                domain=cfg.get("domain"),
+                data_type=cfg["data_type"],
+                data_types=_resolve_data_types(cfg, entry.name),
+            )
+        )
+    return sites
+
+
+def _resolve_data_types(cfg: dict, key: str) -> tuple[str, ...]:
+    """data_types 缺省为 [data_type]；显式声明时必须包含 data_type 且全部合法。"""
+    declared = cfg.get("data_types")
+    if declared is None:
+        return (cfg["data_type"],)
+    if not isinstance(declared, list) or not declared:
+        raise ConfigError(f"站点 {key} data_types 必须是非空列表")
+    invalid = [item for item in declared if item not in DATA_TYPES]
+    if invalid:
+        raise ConfigError(f"站点 {key} data_types 含非法类型: {invalid}")
+    if cfg["data_type"] not in declared:
+        raise ConfigError(f"站点 {key} data_types 必须包含 data_type: {cfg['data_type']!r}")
+    if len(set(declared)) != len(declared):
+        raise ConfigError(f"站点 {key} data_types 存在重复声明")
+    return tuple(declared)
 
 
 def _validate_config(cfg: dict, key: str) -> None:

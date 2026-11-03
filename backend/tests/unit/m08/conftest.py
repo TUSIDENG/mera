@@ -74,7 +74,7 @@ class FakeFetcher(BaseFetcher):
             raise self._error
         return self._records
 
-    def normalize(self, raw: Any) -> tuple[list[Any], bool]:
+    def normalize(self, raw: Any, *, data_type: str | None = None) -> tuple[list[Any], bool]:
         return list(raw), False
 
 
@@ -191,6 +191,7 @@ def make_site(
         path=Path("sites/openrouter"),
         cfg={},
         data_type="model_metrics",
+        data_types=("model_metrics",),
         domain="general",
         strategies=strategies if strategies is not None else [name for name, _ in fetchers],
         fetchers=fetchers,

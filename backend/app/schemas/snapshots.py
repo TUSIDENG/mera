@@ -17,6 +17,8 @@ class SnapshotOut(BaseModel):
     model_id: str
     provider: str
     domain: str
-    benchmark_score: Decimal
+    benchmark_score: Decimal | None
+    scores: dict[str, Any]
+    score_source: str | None
     data: dict[str, Any]
     updated_at: datetime

@@ -94,9 +94,72 @@ class TestNormalizeRecords:
                 provider="demo",
                 domain="coding",
                 benchmark_score=Decimal("89.5"),
+                scores={},
+                score_source="score",
                 data={"extra": 1},
             )
         ]
+
+    def test_scores_mapping_and_fallback(self):
+        """scores 映射产出多维分；score 字段缺失时按 intelligence->coding->agentic 回落。"""
+        cfg = snapshot_cfg()
+        cfg["normalize"]["scores"] = {
+            "intelligence": "aa.intelligence_index",
+            "coding": "aa.coding_index",
+            "agentic": "aa.agentic_index",
+        }
+        cfg["normalize"]["fields"] = {"model_id": "model"}
+        raw = [
+            {"model": "m1", "aa": {"intelligence_index": 51, "coding_index": None}},
+            {"model": "m2", "aa": {"intelligence_index": None, "coding_index": 70.1}},
+            {"model": "m3", "aa": {}},  # 全部维度缺失 -> benchmark_score=None
+        ]
+        records, _ = normalize_records(raw, cfg)
+        assert records[0].scores == {"intelligence": 51.0, "coding": None, "agentic": None}
+        assert records[0].benchmark_score == Decimal(51)
+        assert records[0].score_source == "intelligence"
+        assert records[1].benchmark_score == Decimal("70.1")
+        assert records[1].score_source == "coding"
+        assert records[2].benchmark_score is None
+        assert records[2].score_source is None
+        assert records[0].data["aa"]  # 原始维度路径保留在 data
+
+    def test_api_price_record(self):
+        cfg = snapshot_cfg(data_type="api_price")
+        cfg["normalize"] = {
+            "defaults": {"provider": "openrouter", "currency": "USD", "unit": "token"},
+            "fields": {"model_id": "id", "input_price": "pricing.prompt"},
+        }
+        records, _ = normalize_records(
+            [
+                {"id": "openai/gpt-5", "pricing": {"prompt": "0.00000075"}},
+                {"id": "no-price"},  # 双边价格均缺失 -> 丢弃
+            ],
+            cfg,
+        )
+        assert len(records) == 1
+        record = records[0]
+        assert record.model_id == "openai/gpt-5"
+        assert record.provider == "openrouter"
+        assert record.input_price == Decimal("0.00000075")
+        assert record.output_price is None
+        assert record.currency == "USD"
+        assert record.unit == "token"
+        assert record.source == "demo"
+
+    def test_data_type_override(self):
+        """调用方按任务类型覆盖站点 data_type。"""
+        cfg = snapshot_cfg()
+        cfg["normalize"] = {
+            "defaults": {"provider": "demo"},
+            "fields": {"model_id": "id", "input_price": "pricing.prompt"},
+        }
+        records, _ = normalize_records(
+            [{"id": "m", "pricing": {"prompt": "1"}}],
+            cfg,
+            data_type="api_price",
+        )
+        assert len(records) == 1
 
     def test_provider_from_defaults(self):
         cfg = snapshot_cfg()
@@ -120,11 +183,12 @@ class TestNormalizeRecords:
         raw = [
             {"model": "", "score": "10"},  # model_id 脏值 -> 丢弃
             "not-a-dict",  # 非映射 -> 丢弃
-            {"model": "ok", "score": "N/A"},  # score 脏值 -> 0 且保留 score_raw
+            {"model": "ok", "score": "N/A"},  # score 脏值 -> 无分且保留 score_raw
         ]
         records, _ = normalize_records(raw, snapshot_cfg())
         assert len(records) == 1
-        assert records[0].benchmark_score == Decimal(0)
+        assert records[0].benchmark_score is None
+        assert records[0].score_source is None
         assert records[0].data["score_raw"] == "N/A"
 
     def test_dict_payload_with_truncated_flag(self):

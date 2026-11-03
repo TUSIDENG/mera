@@ -30,10 +30,31 @@ def test_create_task_default_strategy(user_client):
     client, _, enqueuer = user_client
     resp = client.post(
         "/api/v1/fetch-tasks",
-        json={"task_type": "infrastructure_cost", "source_key": "openrouter"},
+        json={"task_type": "api_price", "source_key": "openrouter"},
     )
     assert resp.status_code == 202
     assert enqueuer.enqueued[0][1] is None
+
+
+def test_create_task_type_not_supported_by_site_422(user_client):
+    """openrouter 未声明 infrastructure_cost 能力，语义错配的任务被拒。"""
+    client, _, _ = user_client
+    resp = client.post(
+        "/api/v1/fetch-tasks",
+        json={"task_type": "infrastructure_cost", "source_key": "openrouter"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "invalid_task_type"
+
+
+def test_create_task_unknown_source_422(user_client):
+    client, _, _ = user_client
+    resp = client.post(
+        "/api/v1/fetch-tasks",
+        json={"task_type": "model_metrics", "source_key": "no-such-site"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "unknown_source"
 
 
 def test_create_task_invalid_type_422(user_client):

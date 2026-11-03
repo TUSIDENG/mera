@@ -6,10 +6,10 @@ from decimal import Decimal
 
 import pytest
 
-from tests.unit.m04.conftest import make_snapshot
+from tests.unit.m04.conftest import make_price, make_snapshot
 
 
-def make_priced_snapshot(
+def make_priced_pair(
     model_id: str,
     provider: str,
     benchmark: str,
@@ -17,32 +17,33 @@ def make_priced_snapshot(
     output_price: str,
     display_name: str,
 ):
-    """构造带每 token 单价的快照（价格与线上数据结构一致，均为字符串）。"""
-    return make_snapshot(
+    """榜单快照 + 独立价格行（分表后的线上结构）。"""
+    snapshot = make_snapshot(
         model_id=model_id,
         provider=provider,
         benchmark_score=Decimal(benchmark),
-        data={
-            "input_price": input_price,
-            "output_price": output_price,
-            "display_name": display_name,
-        },
+        data={"display_name": display_name},
     )
+    price = make_price(
+        model_id=model_id,
+        provider=provider,
+        input_price=Decimal(input_price),
+        output_price=Decimal(output_price),
+    )
+    return snapshot, price
 
 
 def test_run_analysis_ranked(user_client):
     client, repo, _ = user_client
-    repo.snapshots = [
-        make_priced_snapshot(
-            "gpt-4o", "openai", "95.50", "0.000003", "0.000015", "GPT-4o"
-        ),
-        make_priced_snapshot(
+    pairs = [
+        make_priced_pair("gpt-4o", "openai", "95.50", "0.000003", "0.000015", "GPT-4o"),
+        make_priced_pair(
             "claude-3", "anthropic", "90.00", "0.00000005", "0.0000005", "Claude 3"
         ),
-        make_priced_snapshot(
-            "gemini", "google", "80.00", "0.000001", "0.000002", "Gemini"
-        ),
+        make_priced_pair("gemini", "google", "80.00", "0.000001", "0.000002", "Gemini"),
     ]
+    repo.snapshots = [snapshot for snapshot, _ in pairs]
+    repo.prices = [price for _, price in pairs]
 
     resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
 
@@ -67,7 +68,23 @@ def test_run_analysis_ranked(user_client):
     assert body["items"][1]["monthly_cost"] == pytest.approx(6.6)
     assert body["items"][2]["monthly_cost"] == pytest.approx(1.3)
 
-    assert repo.calls[0] == ("latest_snapshots", {"domain": "coding"})
+    assert ("latest_prices", {}) in repo.calls
+    assert ("latest_snapshots", {"domain": "coding"}) in repo.calls
+
+
+def test_run_analysis_skips_scoreless_models(user_client):
+    """benchmark_score 为 None（无分）的模型不参与排名。"""
+    client, repo, _ = user_client
+    repo.snapshots = [
+        make_snapshot(model_id="scored", benchmark_score=Decimal(90)),
+        make_snapshot(model_id="scoreless", benchmark_score=None),
+    ]
+    repo.prices = [make_price(model_id="scored")]
+    resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["model_id"] == "scored"
 
 
 def test_run_analysis_unauthorized(anon_client):

@@ -87,6 +87,7 @@ def select_site_strategies(site: SiteConfig, strategy: str | None) -> SiteConfig
         path=site.path,
         cfg=site.cfg,
         data_type=site.data_type,
+        data_types=site.data_types,
         domain=site.domain,
         strategies=[strategy],
         fetchers=[(name, fetcher) for name, fetcher in site.fetchers if name == strategy],

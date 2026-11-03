@@ -8,6 +8,8 @@ from enum import StrEnum
 class FetchTaskType(StrEnum):
     MODEL_METRICS = "model_metrics"
     INFRASTRUCTURE_COST = "infrastructure_cost"
+    API_PRICE = "api_price"
+    SUBSCRIPTION_PLAN = "subscription_plan"
 
 
 class FetchTaskStatus(StrEnum):
@@ -38,6 +40,7 @@ class CostType(StrEnum):
 class BillingCycle(StrEnum):
     MONTHLY = "monthly"
     YEARLY = "yearly"
+    ONE_OFF = "one_off"  # 一次性买断（token 包等预付容量）
 
 
 class SubscriptionSource(StrEnum):

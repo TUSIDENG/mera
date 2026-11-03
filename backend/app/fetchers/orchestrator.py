@@ -19,7 +19,12 @@ from app.core.exceptions import CaptchaRequired, ConfigError, FetchFailed
 from app.db.enums import FetchTaskStatus as Status
 from app.db.state_machine import decide_run_result
 from app.fetchers.base import BaseFetcher, is_strategy_available
-from app.repositories.dto import CostRecord, SnapshotRecord, SubscriptionPlanRecord
+from app.repositories.dto import (
+    ApiPriceRecord,
+    CostRecord,
+    SnapshotRecord,
+    SubscriptionPlanRecord,
+)
 
 
 class Clock(Protocol):
@@ -58,6 +63,7 @@ class FetchRunResult:
 
 _UPSERT_METHOD = {
     SnapshotRecord: "upsert_snapshots",
+    ApiPriceRecord: "upsert_prices",
     CostRecord: "upsert_costs",
     SubscriptionPlanRecord: "upsert_subscription_plans",
 }
@@ -85,6 +91,8 @@ def run_fetch(
         or (pairs[0][1].site_key if pairs else "")
         or getattr(task, "source_key", "")
     )
+    # 任务类型决定标准化产出的 DTO 类型（如 api_price 任务只产出 ApiPriceRecord）
+    task_type = getattr(task, "task_type", None)
     pre_skipped = list(getattr(fetchers, "skipped", ()))
     attempt = int(getattr(task, "attempt_count", 0))
     last_error: str | None = None
@@ -124,7 +132,7 @@ def run_fetch(
                 last_error = exc.message
                 task.log_failure(name, exc.message)
                 continue
-            found, truncated = fetcher.normalize(raw)
+            found, truncated = fetcher.normalize(raw, data_type=task_type)
             if found:
                 records, hit_name = found, name
                 break
@@ -190,6 +198,11 @@ class RepoTaskHandle:
     def attempt_count(self) -> int:
         task = self._repo.get_task(self._task_id)
         return task.attempt_count if task is not None else 0
+
+    @property
+    def task_type(self) -> str | None:
+        task = self._repo.get_task(self._task_id)
+        return task.task_type if task is not None else None
 
     def mark_running(self) -> None:
         self._repo.mark_running(self._task_id)

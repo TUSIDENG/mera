@@ -8,7 +8,12 @@ normalize:
   fields:                            # 标准字段名 <- 原始字段路径（支持 a.b 嵌套）；
     model_id: id                     # 未列出的标准字段按同名恒等映射；
     input_price: pricing.prompt      # 非 DTO 核心列的映射字段写入 data JSONB
+  scores:                            # model_metrics 专用：多维评分映射（维度名 <- 路径）
+    intelligence: benchmarks.artificial_analysis.intelligence_index
 ```
+
+主榜分回落顺序：显式 score 字段 -> intelligence -> coding -> agentic；
+全部缺失时 benchmark_score=None（与真 0 分区分），score_source 记录取值来源。
 """
 
 from __future__ import annotations
@@ -18,9 +23,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.core.exceptions import ConfigError
-from app.repositories.dto import CostRecord, SnapshotRecord, SubscriptionPlanRecord
+from app.repositories.dto import (
+    ApiPriceRecord,
+    CostRecord,
+    SnapshotRecord,
+    SubscriptionPlanRecord,
+)
 
-DATA_TYPES = {"model_metrics", "infrastructure_cost", "subscription_plan"}
+DATA_TYPES = {"model_metrics", "infrastructure_cost", "subscription_plan", "api_price"}
 
 _NUMBER_RE = re.compile(r"-?\d+(?:,\d{3})*(?:\.\d+)?")
 _WS_RE = re.compile(r"\s+")
@@ -38,7 +48,18 @@ _STANDARD_FIELDS: dict[str, tuple[str, ...]] = {
         "billing_cycle",
         "is_active",
     ),
+    "api_price": (
+        "model_id",
+        "provider",
+        "input_price",
+        "output_price",
+        "currency",
+        "unit",
+    ),
 }
+
+# 主榜分维度回落顺序（显式 score 字段优先，其次按此顺序取第一个非空维度）
+_SCORE_FALLBACK_ORDER = ("intelligence", "coding", "agentic")
 
 
 def parse_score(value: Any) -> Decimal | None:
@@ -59,10 +80,13 @@ def canonical_model_name(value: Any) -> str | None:
     return name or None
 
 
-def normalize_records(raw: Any, cfg: dict) -> tuple[list[Any], bool]:
+def normalize_records(
+    raw: Any, cfg: dict, *, data_type: str | None = None
+) -> tuple[list[Any], bool]:
     """把站点原始记录标准化为仓储 DTO 列表。
 
     raw 可以是记录列表，或 {"records": [...], "truncated": bool}（翻页被截断）。
+    data_type 缺省取 cfg.data_type；调用方可按任务类型覆盖（如 api_price）。
     返回 (records, truncated)；无法构造合法 DTO 的记录被丢弃，不抛异常。
     """
     truncated = False
@@ -73,19 +97,20 @@ def normalize_records(raw: Any, cfg: dict) -> tuple[list[Any], bool]:
     if not isinstance(items, list):
         return [], truncated
 
-    data_type = cfg.get("data_type")
-    if data_type not in DATA_TYPES:
-        raise ConfigError(f"站点 {cfg.get('key', '?')} 数据类型非法: {data_type!r}")
+    effective_type = data_type or cfg.get("data_type")
+    if effective_type not in DATA_TYPES:
+        raise ConfigError(f"站点 {cfg.get('key', '?')} 数据类型非法: {effective_type!r}")
 
     normalize_cfg = cfg.get("normalize") or {}
     fields: dict[str, str] = dict(normalize_cfg.get("fields") or {})
     defaults: dict[str, Any] = dict(normalize_cfg.get("defaults") or {})
+    scores_map: dict[str, str] = dict(normalize_cfg.get("scores") or {})
 
     records = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        record = _normalize_item(item, data_type, fields, defaults, cfg)
+        record = _normalize_item(item, effective_type, fields, defaults, scores_map, cfg)
         if record is not None:
             records.append(record)
     return records, truncated
@@ -96,6 +121,7 @@ def _normalize_item(
     data_type: str,
     fields: dict[str, str],
     defaults: dict[str, Any],
+    scores_map: dict[str, str],
     cfg: dict,
 ) -> Any | None:
     values: dict[str, Any] = {}
@@ -119,27 +145,55 @@ def _normalize_item(
             data[key] = value
 
     if data_type == "model_metrics":
-        return _build_snapshot(values, data, cfg)
+        return _build_snapshot(values, data, cfg, scores_map, item)
     if data_type == "infrastructure_cost":
         return _build_cost(values, data, cfg)
+    if data_type == "api_price":
+        return _build_price(values, data, cfg)
     return _build_plan(values, data, cfg)
 
 
-def _build_snapshot(values: dict, data: dict, cfg: dict) -> SnapshotRecord | None:
+def _build_snapshot(
+    values: dict,
+    data: dict,
+    cfg: dict,
+    scores_map: dict[str, str],
+    item: dict,
+) -> SnapshotRecord | None:
     model_id = canonical_model_name(values.get("model_id"))
     # 单来源站点 provider 缺失时回落站点 key（如 aider_leaderboard）
     provider = _clean_str(values.get("provider")) or _clean_str(cfg.get("key"))
     if not model_id or not provider:
         return None
+
+    # 多维评分结构化（JSONB 存 float，None 表示该维度缺失）；维度路径原样保留在 data
+    scores: dict[str, float | None] = {
+        dim: (float(parsed) if (parsed := parse_score(_dig(item, path))) is not None else None)
+        for dim, path in scores_map.items()
+    }
+
     score = parse_score(values.get("score"))
+    score_source: str | None = None
     raw_score = values.get("score")
-    if raw_score is not None and score is None:
+    if score is not None:
+        score_source = "score"
+    elif raw_score is not None:
         data.setdefault("score_raw", raw_score)
+    if score is None:
+        for dim in _SCORE_FALLBACK_ORDER:
+            dim_score = scores.get(dim)
+            if dim_score is not None:
+                # scores 存 float（JSONB），主榜分列是 Numeric，经 str 避免浮点尾差
+                score = Decimal(str(dim_score))
+                score_source = dim
+                break
     return SnapshotRecord(
         model_id=model_id,
         provider=provider,
         domain=str(cfg.get("domain") or "general"),
-        benchmark_score=score if score is not None else Decimal(0),
+        benchmark_score=score,
+        scores=scores,
+        score_source=score_source,
         data=data,
     )
 
@@ -158,6 +212,27 @@ def _build_cost(values: dict, data: dict, cfg: dict) -> CostRecord | None:
         region=_clean_str(values.get("region")) or "default",
         source=str(cfg.get("key") or "") or None,
         is_active=_is_active(values.get("is_active")),
+        data=data,
+    )
+
+
+def _build_price(values: dict, data: dict, cfg: dict) -> ApiPriceRecord | None:
+    model_id = canonical_model_name(values.get("model_id"))
+    provider = _clean_str(values.get("provider")) or _clean_str(cfg.get("key"))
+    if not model_id or not provider:
+        return None
+    input_price = parse_price(values.get("input_price"))
+    output_price = parse_price(values.get("output_price"))
+    if input_price is None and output_price is None:
+        return None
+    return ApiPriceRecord(
+        model_id=model_id,
+        provider=provider,
+        input_price=input_price,
+        output_price=output_price,
+        currency=_clean_str(values.get("currency")) or "USD",
+        unit=_clean_str(values.get("unit")) or "token",
+        source=_clean_str(cfg.get("key")),
         data=data,
     )
 

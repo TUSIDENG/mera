@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from app.core.exceptions import ConfigError
-from app.fetchers.config_loader import discover_sites, load_site
+from app.fetchers.config_loader import discover_sites, list_sites, load_site
 
 _FETCHER_SRC = """\
 from app.fetchers.base import BaseFetcher
@@ -46,6 +46,38 @@ def valid_cfg(**overrides) -> dict:
     }
     cfg.update(overrides)
     return cfg
+
+
+class TestListSites:
+    def test_returns_meta_with_data_types(self, tmp_path: Path) -> None:
+        root = make_site(
+            tmp_path,
+            "openrouter",
+            valid_cfg(
+                key="openrouter",
+                data_type="model_metrics",
+                data_types=["model_metrics", "api_price"],
+                label="OpenRouter",
+            ),
+            {"api.py": _FETCHER_SRC},
+        )
+        sites = list_sites(root)
+        assert len(sites) == 1
+        site = sites[0]
+        assert site.key == "openrouter"
+        assert site.label == "OpenRouter"
+        assert site.data_types == ("model_metrics", "api_price")
+
+    def test_data_types_defaults_to_data_type(self, tmp_path: Path) -> None:
+        root = make_site(tmp_path, "demo", valid_cfg(key="demo"), {"api.py": _FETCHER_SRC})
+        (site,) = list_sites(root)
+        assert site.data_types == ("model_metrics",)
+
+    def test_invalid_config_skipped_silently(self, tmp_path: Path) -> None:
+        make_site(tmp_path, "good", valid_cfg(key="good"), {"api.py": _FETCHER_SRC})
+        make_site(tmp_path, "bad", {"key": "bad", "data_type": "bogus"})
+        sites = list_sites(tmp_path)
+        assert [site.key for site in sites] == ["good"]
 
 
 class TestDiscoverSites:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import ColumnElement, and_, asc, func, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -15,17 +16,40 @@ from app.db.enums import FetchTaskStatus
 from app.db.models import (
     FetchTask,
     InfrastructureCost,
+    ModelApiPrice,
     ModelSnapshot,
     SubscriptionPlan,
     UserEvaluation,
 )
 from app.db.state_machine import ensure_terminal_rules, ensure_transition
 from app.repositories.dto import (
+    ApiPriceRecord,
     CostRecord,
     CreateTaskParams,
     SnapshotRecord,
     SubscriptionPlanRecord,
 )
+
+
+def _business_key(record: Any) -> tuple[Any, ...]:
+    """各类记录的业务键（与唯一约束一一对应），用于批量 upsert 前去重。"""
+    if isinstance(record, SnapshotRecord):
+        return (record.model_id, record.domain)
+    if isinstance(record, ApiPriceRecord):
+        return (record.model_id, record.provider)
+    if isinstance(record, CostRecord):
+        return (record.cost_type, record.name, record.region)
+    if isinstance(record, SubscriptionPlanRecord):
+        return (record.provider, record.plan_key, record.billing_cycle)
+    raise TypeError(f"未知记录类型: {type(record)!r}")
+
+
+def _dedupe_for_upsert(records: Sequence[Any]) -> list[Any]:
+    """PG 批量 ON CONFLICT 不允许同命令两次影响同一行：同业务键去重，后写覆盖先写。"""
+    seen: dict[tuple[Any, ...], Any] = {}
+    for record in records:
+        seen[_business_key(record)] = record
+    return list(seen.values())
 
 
 class Repository:
@@ -42,13 +66,15 @@ class Repository:
         return len(records)
 
     def _upsert_snapshots_pg(self, records: Sequence[SnapshotRecord]) -> None:
-        values = [record.__dict__.copy() for record in records]
+        values = [record.__dict__.copy() for record in _dedupe_for_upsert(records)]
         stmt = pg_insert(ModelSnapshot).values(values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_model_snapshot",
             set_={
                 "provider": stmt.excluded.provider,
                 "benchmark_score": stmt.excluded.benchmark_score,
+                "scores": stmt.excluded.scores,
+                "score_source": stmt.excluded.score_source,
                 "data": stmt.excluded.data,
                 "updated_at": func.now(),
             },
@@ -70,7 +96,100 @@ class Repository:
             else:
                 existing.provider = record.provider
                 existing.benchmark_score = record.benchmark_score
+                existing.scores = record.scores
+                existing.score_source = record.score_source
                 existing.data = record.data
+
+    def upsert_prices(self, records: Sequence[ApiPriceRecord]) -> int:
+        """API 按量价格 upsert，业务键 (model_id, provider)。"""
+        if not records:
+            return 0
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            self._upsert_prices_pg(records)
+        else:
+            self._upsert_prices_generic(records)
+        return len(records)
+
+    def _upsert_prices_pg(self, records: Sequence[ApiPriceRecord]) -> None:
+        values = [record.__dict__.copy() for record in _dedupe_for_upsert(records)]
+        stmt = pg_insert(ModelApiPrice).values(values)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_model_api_price",
+            set_={
+                "input_price": stmt.excluded.input_price,
+                "output_price": stmt.excluded.output_price,
+                "currency": stmt.excluded.currency,
+                "unit": stmt.excluded.unit,
+                "source": stmt.excluded.source,
+                "is_active": stmt.excluded.is_active,
+                "data": stmt.excluded.data,
+                "updated_at": func.now(),
+            },
+        )
+        self.session.execute(stmt)
+
+    def _upsert_prices_generic(self, records: Sequence[ApiPriceRecord]) -> None:
+        for record in records:
+            existing = self.session.scalar(
+                select(ModelApiPrice).where(
+                    and_(
+                        ModelApiPrice.model_id == record.model_id,
+                        ModelApiPrice.provider == record.provider,
+                    )
+                )
+            )
+            if existing is None:
+                self.session.add(ModelApiPrice(**record.__dict__))
+            else:
+                existing.input_price = record.input_price
+                existing.output_price = record.output_price
+                existing.currency = record.currency
+                existing.unit = record.unit
+                existing.source = record.source
+                existing.is_active = record.is_active
+                existing.data = record.data
+
+    def latest_prices(self) -> list[ModelApiPrice]:
+        """全部活跃 API 价格（分析层按 (model_id, provider) 关联）。"""
+        stmt = select(ModelApiPrice).where(ModelApiPrice.is_active.is_(True))
+        return list(self.session.scalars(stmt))
+
+    def get_price(self, model_id: str, provider: str) -> ModelApiPrice | None:
+        stmt = select(ModelApiPrice).where(
+            and_(
+                ModelApiPrice.model_id == model_id,
+                ModelApiPrice.provider == provider,
+            )
+        )
+        return self.session.scalar(stmt)
+
+    def list_prices(
+        self,
+        *,
+        provider: str | None = None,
+        model_id: str | None = None,
+        active_only: bool = False,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ModelApiPrice], int]:
+        condition: ColumnElement[bool] = true()
+        if provider:
+            condition = and_(condition, ModelApiPrice.provider == provider)
+        if model_id:
+            condition = and_(condition, ModelApiPrice.model_id == model_id)
+        if active_only:
+            condition = and_(condition, ModelApiPrice.is_active.is_(True))
+        total = self.session.scalar(
+            select(func.count()).select_from(ModelApiPrice).where(condition)
+        )
+        stmt = (
+            select(ModelApiPrice)
+            .where(condition)
+            .order_by(asc(ModelApiPrice.provider), asc(ModelApiPrice.model_id))
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self.session.scalars(stmt).all()), int(total or 0)
 
     def upsert_costs(self, records: Sequence[CostRecord]) -> int:
         if not records:
@@ -82,7 +201,7 @@ class Repository:
         return len(records)
 
     def _upsert_costs_pg(self, records: Sequence[CostRecord]) -> None:
-        values = [record.__dict__.copy() for record in records]
+        values = [record.__dict__.copy() for record in _dedupe_for_upsert(records)]
         stmt = pg_insert(InfrastructureCost).values(values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_infra_cost",
@@ -127,7 +246,7 @@ class Repository:
         return len(records)
 
     def _upsert_plans_pg(self, records: Sequence[SubscriptionPlanRecord]) -> None:
-        values = [record.__dict__.copy() for record in records]
+        values = [record.__dict__.copy() for record in _dedupe_for_upsert(records)]
         stmt = pg_insert(SubscriptionPlan).values(values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_subscription_plan",
@@ -329,7 +448,10 @@ class Repository:
         stmt = (
             select(ModelSnapshot)
             .where(condition)
-            .order_by(ModelSnapshot.benchmark_score.desc(), asc(ModelSnapshot.model_id))
+            .order_by(
+                ModelSnapshot.benchmark_score.desc().nulls_last(),
+                asc(ModelSnapshot.model_id),
+            )
             .limit(limit)
             .offset(offset)
         )
