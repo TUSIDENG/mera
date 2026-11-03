@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Layout from './components/Layout'
+import AnalysisPage from './pages/AnalysisPage'
 import CallbackPage from './pages/CallbackPage'
 import ComparePage from './pages/ComparePage'
 import CostsPage from './pages/CostsPage'
@@ -25,13 +26,14 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/callback" element={<CallbackPage />} />
       <Route element={<RequireAuth />}>
-        <Route path="/" element={<Navigate to="/leaderboard" replace />} />
+        <Route path="/" element={<Navigate to="/analysis" replace />} />
+        <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/models/:modelId" element={<ModelDetailPage />} />
         <Route path="/compare" element={<ComparePage />} />
         <Route path="/costs" element={<CostsPage />} />
         <Route path="/tasks" element={<TasksPage />} />
-        <Route path="*" element={<Navigate to="/leaderboard" replace />} />
+        <Route path="*" element={<Navigate to="/analysis" replace />} />
       </Route>
     </Routes>
   )

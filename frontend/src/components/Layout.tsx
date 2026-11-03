@@ -4,6 +4,7 @@ import { cn } from '../lib/utils'
 import { useAuthStore } from '../stores/auth'
 
 const NAV_ITEMS = [
+  { to: '/analysis', label: '智能分析' },
   { to: '/leaderboard', label: '榜单' },
   { to: '/compare', label: '对比' },
   { to: '/costs', label: '成本' },

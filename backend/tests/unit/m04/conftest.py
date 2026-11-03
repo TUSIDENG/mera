@@ -146,6 +146,10 @@ class FakeRepo:
         self._log("snapshots_by_model", model_id=model_id)
         return self.snapshots
 
+    def latest_snapshots(self, domain: str):
+        self._log("latest_snapshots", domain=domain)
+        return self.snapshots
+
     def list_tasks(self, *, status: str | None, limit: int, offset: int):
         self._log("list_tasks", status=status, limit=limit, offset=offset)
         items = [self.task] if self.task is not None else []

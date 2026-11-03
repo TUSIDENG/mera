@@ -328,12 +328,13 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 |---|---|
 | 目标与边界 | 榜单归一化、TCO 估算、加权排名；**零 I/O，全部输入输出为 dataclass** |
 | 代码位置 | `app/scoring/engine.py`、`app/scoring/models.py` |
-| 对外接口 | `normalize_benchmark(scores, method)->dict`；`estimate_tco(cost: InfraCost, tokens_per_month)->float`（租赁/采购折旧+电费+带宽）；`break_even_subscription(api_cost, plans: list[SubscriptionPlan])->SubscriptionPlan|None`（选覆盖候选模型厂商的最低可用套餐，套餐数据来自 `subscription_plans` 表、由调用方注入，引擎不读 `model_snapshots` 的价格键）；`rank_models(inputs: RankInputs, weights: Weights)->list[RankedModel]` |
+| 对外接口 | `normalize_benchmark(scores, method="minmax")->dict[str,float]`；`estimate_tco(cost: InfraCost, tokens_per_month)->float`（租赁/采购折旧+电费+带宽）；`break_even_subscription(api_cost, plans: list[PlanInput], tokens_per_month=1_000_000)->BreakEvenResult|None`（只在月费低于月度 API 成本的套餐中取最低价，返回套餐、节省额与用量是否充足；套餐由调用方注入，引擎零 I/O）；`rank_models(inputs: RankInputs, weights: Weights)->list[RankedModel]` |
 | 实现要点 | 权重和≠1 抛 `InvalidWeights`；分数归一到 [0,1]；缺项模型不崩溃；同分字典序稳定排序；订阅档位（月费+用量上限）作为输入 dataclass 参与 API vs 订阅 vs 自部署三方案比对，引擎本身零 I/O |
 | 依赖 | M02（只读其输出结构，不直接查询） |
 | 下游 | M04 |
 | 测试方案 | minmax 边界（全相同值→0.5）；TCO 各成本项公式断言；权重全打价格→最低价第一；break_even：无可用套餐→None / 多套餐取最低价 / 用量上限低于输入量级时标记“不够用”；性质测试（任意输入分值∈[0,1]、确定性）；golden case：5 模型预制输入→固定排序快照 |
-| 验收清单 | [ ] 覆盖率 ≥90% [ ] golden case 入库存档 |
+| 验收清单 | [x] 覆盖率 ≥90% [x] golden case 入库存档 |
+| 实现状态 | **✅ 已实现（2026-11）**：`app/scoring/models.py`（Weights/ModelInput/RankInputs/RankedModel/InfraCost/PlanInput/BreakEvenResult，全部 frozen dataclass）+ `app/scoring/engine.py`（零 I/O 纯函数）。M04 `/api/v1/analysis/run` 已由 501 占位改为真实实现：`app/schemas/analysis.py` + 路由读取 `repo.latest_snapshots(domain)`，把 `data.input_price/output_price`（字符串每 token 单价）转 `Decimal` 后交引擎。口径：榜单 minmax，空/单值/全相同→0.5；价格 minmax 取反，input/output 任一缺项→`price_norm=0.5` 中性且 `monthly_cost=None`、不参与价格极值；月成本 = `tokens_per_month × (input_ratio×input_price + (1-input_ratio)×output_price)`；权重和容差 1e-6、负值或 >1 抛 `InvalidWeights`（422），同分按 `model_id` 字典序稳定排序。`break_even_subscription` 只考虑 `monthly_price < api_cost` 的套餐并取最低月费（同价按 provider/plan_key 稳定）；`sufficient = tokens_limit is None or tokens_limit >= tokens_per_month`；无更便宜套餐→None。单测 `tests/unit/m09/` 28 用例（含 `golden_rank.json` 5 模型快照），全量单测 371 绿，scoring 覆盖率 100%，ruff/mypy 通过 |
 
 ### M10 通知服务
 
@@ -357,7 +358,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 依赖 | M04 |
 | 测试方案 | Vitest + Testing Library；MSW mock `/api` 响应；组件测：榜单 Table 渲染/排序（断言自己实现的 hook 逻辑 + `data-testid`，Radix 交互用 `userEvent` 驱动）、表单校验（zod schema 纯函数直测）、`<Chart>` mock Recharts 实例只断言收到正确数据；store reducer 单测 |
 | 验收清单 | [x] 核心页面组件单测通过 [x] MSW 下无真实网络请求 |
-| 实现状态 | **✅ 已实现（2026-11）**：`frontend/`（React 18 + Vite + TS + Tailwind + shadcn 风格组件 + zustand + TanStack Table + RHF/zod + Recharts + sonner）。OIDC 授权码 + PKCE 纯前端实现（`lib/oidc.ts`，token 存 sessionStorage），运行时配置 `window.MERA_CONFIG` 由容器 entrypoint 生成 `/config.js`；nginx 反代 `/api/` 并 SPA fallback。页面：/login、/callback、/leaderboard（domain tabs + 排序分页）、/models/:id（历史折线）、/compare（雷达）、/costs（套餐表）、/tasks（10s 轮询 + 触发采集表单）。单测 26 用例全绿，`npm run build` 与镜像构建通过；compose 全栈 E2E：OIDC 登录 → 触发 openrouter 采集 → 榜单展示 452 条快照 |
+| 实现状态 | **✅ 已实现（2026-11）**：`frontend/`（React 18 + Vite + TS + Tailwind + shadcn 风格组件 + zustand + TanStack Table + RHF/zod + Recharts + sonner）。OIDC 授权码 + PKCE 纯前端实现（`lib/oidc.ts`，token 存 sessionStorage），运行时配置 `window.MERA_CONFIG` 由容器 entrypoint 生成 `/config.js`；nginx 反代 `/api/` 并 SPA fallback。页面：/login、/callback、/analysis（智能分析：权重/月用量/输入占比表单 → M09 加权排名表，首个菜单项与默认路由）、/leaderboard（domain tabs + 排序分页）、/models/:id（历史折线）、/compare（雷达）、/costs（套餐表）、/tasks（10s 轮询 + 触发采集表单）。单测 31 用例全绿，`npm run build` 与镜像构建通过；compose 全栈 E2E：OIDC 登录 → 触发 openrouter 采集 → 榜单展示 452 条快照 |
 
 ### M12 部署与 CI
 

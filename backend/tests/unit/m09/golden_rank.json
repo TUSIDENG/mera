@@ -1,0 +1,56 @@
+{
+  "description": "M09 golden case: fixed 5-model inputs and expected ranking snapshot.",
+  "weights": {"benchmark": 0.5, "price": 0.5},
+  "tokens_per_month": 1000000,
+  "input_ratio": 0.7,
+  "models": [
+    {
+      "model_id": "m1",
+      "provider": "p1",
+      "display_name": "Model 1",
+      "benchmark_score": 100,
+      "input_price": "0.000005",
+      "output_price": "0.000005"
+    },
+    {
+      "model_id": "m2",
+      "provider": "p2",
+      "display_name": "Model 2",
+      "benchmark_score": 60,
+      "input_price": "0.000004",
+      "output_price": "0.000004"
+    },
+    {
+      "model_id": "m3",
+      "provider": "p3",
+      "display_name": "Model 3",
+      "benchmark_score": 80,
+      "input_price": "0.000003",
+      "output_price": "0.000003"
+    },
+    {
+      "model_id": "m4",
+      "provider": "p4",
+      "display_name": "Model 4",
+      "benchmark_score": 70,
+      "input_price": "0.000002",
+      "output_price": "0.000002"
+    },
+    {
+      "model_id": "m5",
+      "provider": "p5",
+      "display_name": "Model 5",
+      "benchmark_score": 90,
+      "input_price": "0.000001",
+      "output_price": "0.000001"
+    }
+  ],
+  "expected_order": ["m5", "m1", "m3", "m4", "m2"],
+  "expected_composite": {
+    "m5": 0.875,
+    "m1": 0.5,
+    "m3": 0.5,
+    "m4": 0.5,
+    "m2": 0.125
+  }
+}
