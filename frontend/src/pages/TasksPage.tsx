@@ -6,10 +6,13 @@ import {
   createFetchTask,
   fetchTaskFormSchema,
   listFetchTasks,
-  SOURCE_OPTIONS,
+  TASK_TYPES,
+  TASK_TYPE_LABELS,
   type FetchTask,
   type FetchTaskFormValues,
+  type TaskType,
 } from '../api/tasks'
+import { listSites, type CollectionSite } from '../api/sites'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
@@ -59,6 +62,7 @@ const FORM_DEFAULTS: FetchTaskFormValues = {
 export default function TasksPage() {
   const [tasks, setTasks] = useState<FetchTask[]>([])
   const [total, setTotal] = useState(0)
+  const [sites, setSites] = useState<CollectionSite[]>([])
 
   const form = useForm<FetchTaskFormValues>({
     resolver: zodResolver(fetchTaskFormSchema),
@@ -75,19 +79,30 @@ export default function TasksPage() {
     }
   }, [])
 
-  // 首次加载 + 每 10s 轮询任务状态
+  // 首次加载任务列表 + 站点列表（站点列表用于任务类型联动）
   useEffect(() => {
     void load()
+    void listSites().then(setSites).catch((e) => {
+      toast.error(e instanceof Error ? e.message : '站点列表加载失败')
+    })
     const timer = setInterval(() => void load(), POLL_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [load])
 
-  // domain 随 source_key 联动
+  // 选中站点后：domain 联动 + task_type 自动对齐到该站点支持的类型
   const sourceKey = form.watch('source_key')
+  const selectedSite = sites.find((s) => s.key === sourceKey)
   useEffect(() => {
-    const option = SOURCE_OPTIONS.find((o) => o.value === sourceKey)
-    if (option) form.setValue('domain', option.domain)
-  }, [sourceKey, form])
+    if (!selectedSite) return
+    form.setValue('domain', selectedSite.domain ?? '')
+    const currentType = form.getValues('task_type') as TaskType
+    if (!selectedSite.data_types.includes(currentType)) {
+      const fallback =
+        selectedSite.data_types.find((t) => TASK_TYPES.includes(t as TaskType)) ??
+        TASK_TYPES[0]
+      form.setValue('task_type', fallback as TaskType)
+    }
+  }, [selectedSite, form])
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -123,13 +138,20 @@ export default function TasksPage() {
                 control={form.control}
                 name="task_type"
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    disabled={!selectedSite}
+                  >
                     <SelectTrigger id="task_type">
-                      <SelectValue />
+                      <SelectValue placeholder={selectedSite ? undefined : '请先选择站点'} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="model_metrics">模型指标</SelectItem>
-                      <SelectItem value="infrastructure_cost">基础设施成本</SelectItem>
+                      {(selectedSite?.data_types ?? []).map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {TASK_TYPE_LABELS[t as TaskType] ?? t}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 )}
@@ -147,9 +169,9 @@ export default function TasksPage() {
                       <SelectValue placeholder="请选择站点" />
                     </SelectTrigger>
                     <SelectContent>
-                      {SOURCE_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
+                      {sites.map((s) => (
+                        <SelectItem key={s.key} value={s.key}>
+                          {s.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

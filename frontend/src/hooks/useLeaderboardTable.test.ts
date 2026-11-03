@@ -10,6 +10,8 @@ function makeSnapshot(modelId: string, score: string, updatedAt = '2026-01-01T00
     provider: 'p-' + modelId,
     domain: 'general',
     benchmark_score: score,
+    scores: {},
+    score_source: 'score',
     data: {},
     updated_at: updatedAt,
   }

@@ -1,12 +1,16 @@
 import { useMemo, useState } from 'react'
 import type { Snapshot } from '../api/models'
 
-export type SortKey = 'rank' | 'model_id' | 'provider' | 'benchmark_score' | 'updated_at'
+/** 排序键：固定列 + 任意维度名（scores 中的 key） */
+export type SortKey = string
 
 export interface SortState {
   key: SortKey
   desc: boolean
 }
+
+/** 文本列（默认升序），其余数值/时间列默认降序 */
+const TEXT_KEYS = new Set(['model_id', 'provider'])
 
 /** 附带榜单排名（按接口返回顺序，后端已按分数降序） */
 export type RankedSnapshot = Snapshot & { rank: number }
@@ -16,22 +20,24 @@ export function sortItems(items: RankedSnapshot[], sort: SortState): RankedSnaps
   const dir = sort.desc ? -1 : 1
   return [...items].sort((a, b) => {
     let cmp = 0
-    switch (sort.key) {
-      case 'rank':
-        cmp = a.rank - b.rank
-        break
-      case 'model_id':
-        cmp = a.model_id.localeCompare(b.model_id)
-        break
-      case 'provider':
-        cmp = a.provider.localeCompare(b.provider)
-        break
-      case 'benchmark_score':
-        cmp = Number(a.benchmark_score) - Number(b.benchmark_score)
-        break
-      case 'updated_at':
-        cmp = a.updated_at.localeCompare(b.updated_at)
-        break
+    const key = sort.key
+    if (key === 'rank') {
+      cmp = a.rank - b.rank
+    } else if (key === 'model_id') {
+      cmp = a.model_id.localeCompare(b.model_id)
+    } else if (key === 'provider') {
+      cmp = a.provider.localeCompare(b.provider)
+    } else if (key === 'benchmark_score') {
+      cmp = Number(a.benchmark_score) - Number(b.benchmark_score)
+    } else if (key === 'updated_at') {
+      cmp = a.updated_at.localeCompare(b.updated_at)
+    } else {
+      // 动态维度分：从 scores 取，null 排最后
+      const av = a.scores?.[key]
+      const bv = b.scores?.[key]
+      if (av === null || av === undefined) cmp = bv === null || bv === undefined ? 0 : 1
+      else if (bv === null || bv === undefined) cmp = -1
+      else cmp = Number(av) - Number(bv)
     }
     return cmp * dir
   })
@@ -59,7 +65,7 @@ export function useLeaderboardTable(items: Snapshot[], pageSize = 20) {
       // 文本列默认升序，数值/时间列默认降序；同列再次点击翻转
       prev.key === key
         ? { key, desc: !prev.desc }
-        : { key, desc: key !== 'model_id' && key !== 'provider' },
+        : { key, desc: !TEXT_KEYS.has(key) },
     )
     setPage(1)
   }

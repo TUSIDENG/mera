@@ -6,7 +6,11 @@ export interface Snapshot {
   model_id: string
   provider: string
   domain: string
-  benchmark_score: string
+  benchmark_score: string | null
+  /** 各维度原始分（如 { intelligence: 51, coding: 70.1, agentic: null }） */
+  scores: Record<string, number | null>
+  /** 主榜分来源维度（score/intelligence/coding/agentic），缺失为 null */
+  score_source: string | null
   data: Record<string, unknown>
   updated_at: string
 }

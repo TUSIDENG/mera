@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fetchTaskFormSchema, SOURCE_OPTIONS } from './tasks'
+import { fetchTaskFormSchema, TASK_TYPES } from './tasks'
 
 describe('fetchTaskFormSchema', () => {
   it('合法表单通过校验', () => {
@@ -42,14 +42,13 @@ describe('fetchTaskFormSchema', () => {
     ).toBe(false)
   })
 
-  it('SOURCE_OPTIONS 覆盖四个站点且 domain 联动正确', () => {
-    expect(SOURCE_OPTIONS.map((o) => o.value)).toEqual([
-      'openrouter',
-      'artificial_analysis',
-      'lmarena',
-      'aider_leaderboard',
+  it('TASK_TYPES 覆盖四种数据域', () => {
+    // 站点列表改由后端 /api/v1/sites 动态返回，前端仅维护任务类型枚举
+    expect(TASK_TYPES).toEqual([
+      'model_metrics',
+      'api_price',
+      'infrastructure_cost',
+      'subscription_plan',
     ])
-    expect(SOURCE_OPTIONS.find((o) => o.value === 'lmarena')?.domain).toBe('chat')
-    expect(SOURCE_OPTIONS.find((o) => o.value === 'aider_leaderboard')?.domain).toBe('coding')
   })
 })

@@ -19,15 +19,23 @@ export interface FetchTask {
   updated_at: string
 }
 
-/** 采集站点与默认 domain 的联动配置（与 M02 业务键一致） */
-export const SOURCE_OPTIONS = [
-  { value: 'openrouter', label: 'OpenRouter', domain: 'general' },
-  { value: 'artificial_analysis', label: 'Artificial Analysis', domain: 'general' },
-  { value: 'lmarena', label: 'LMArena', domain: 'chat' },
-  { value: 'aider_leaderboard', label: 'Aider Leaderboard', domain: 'coding' },
+/** 任务类型取值集合（与后端 FetchTaskType 对齐） */
+export const TASK_TYPES = [
+  'model_metrics',
+  'api_price',
+  'infrastructure_cost',
+  'subscription_plan',
 ] as const
 
-export type SourceKey = (typeof SOURCE_OPTIONS)[number]['value']
+export type TaskType = (typeof TASK_TYPES)[number]
+
+/** 任务类型中文名（用于前端下拉展示） */
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  model_metrics: '模型指标（榜单）',
+  api_price: 'API 价格',
+  infrastructure_cost: '基础设施成本',
+  subscription_plan: '订阅套餐',
+}
 
 export const DOMAIN_LABELS: Record<string, string> = {
   general: '通用',
@@ -40,7 +48,7 @@ export const DOMAIN_LABELS: Record<string, string> = {
  * fetch_strategy 的 'auto' 为表单占位值，提交时转为 undefined（由编排层自动降级）。
  */
 export const fetchTaskFormSchema = z.object({
-  task_type: z.enum(['model_metrics', 'infrastructure_cost']),
+  task_type: z.enum(TASK_TYPES),
   source_key: z.string().min(1, '请选择采集站点'),
   domain: z.string().max(50).optional(),
   fetch_strategy: z.union([z.enum(['api', 'reverse_api', 'playwright']), z.literal('auto')]).optional(),
@@ -50,7 +58,7 @@ export type FetchTaskFormValues = z.infer<typeof fetchTaskFormSchema>
 
 /** 创建采集任务的请求体（与后端 FetchTaskCreate 对齐） */
 export interface FetchTaskCreateBody {
-  task_type: 'model_metrics' | 'infrastructure_cost'
+  task_type: TaskType
   source_key: string
   domain?: string
   fetch_strategy?: 'api' | 'reverse_api' | 'playwright'
@@ -68,3 +76,4 @@ export function createFetchTask(body: FetchTaskCreateBody) {
     body: JSON.stringify(body),
   })
 }
+
