@@ -110,6 +110,7 @@ class TestTerminalRouting:
         assert result.hit_count == 0
         assert repo.calls == 0  # 0 条记录不落库
         assert len(task.skips) == 2  # 跳过原因只在首轮记录
+        assert task.attempt_count == 3  # 每次尝试回写 attempt_count
 
     def test_max_attempts_with_hits_partial_succeeded(self):
         task = FakeTask(attempt_count=2)  # 已尝试 2 次，本轮到顶
@@ -119,6 +120,7 @@ class TestTerminalRouting:
         assert task.transitions[-1][1]["hit_count"] == 2
         assert clock.sleeps == []  # 部分成功不熔断、不再重试
         assert result.status == Status.PARTIAL_SUCCEEDED
+        assert task.attempt_count == 3  # 既有 2 次 + 本轮 1 次
 
     def test_max_attempts_zero_hit_failed_exhausted(self):
         task = FakeTask(attempt_count=2)

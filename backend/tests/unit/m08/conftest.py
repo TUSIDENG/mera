@@ -100,6 +100,11 @@ class FakeRepo:
     def mark_running(self, task_id: uuid.UUID) -> FetchTask:
         return self._set_status(FetchTaskStatus.RUNNING.value)
 
+    def bump_attempt(self, task_id: uuid.UUID) -> FetchTask:
+        assert self.task is not None
+        self.task.attempt_count += 1
+        return self.task
+
     def mark_retry_pending(
         self, task_id: uuid.UUID, *, error_message: str | None = None
     ) -> FetchTask:

@@ -42,6 +42,7 @@ class FetchTaskControl(Protocol):
     attempt_count: int
 
     def mark_running(self) -> None: ...
+    def bump_attempt(self) -> None: ...
     def mark_retry_pending(self, error_message: str | None = None) -> None: ...
     def mark_succeeded(self, *, strategy: str, hit_count: int) -> None: ...
     def mark_partial_succeeded(self, *, strategy: str, hit_count: int) -> None: ...
@@ -140,6 +141,7 @@ def run_fetch(
 
         hit_count = _upsert_records(repo, records) if records else 0
         attempt += 1
+        task.bump_attempt()  # 回写 DB attempt_count，与终态规则（partial 要求 >=1）对齐
         status = decide_run_result(
             hit_count=hit_count,
             truncated=truncated,
@@ -206,6 +208,9 @@ class RepoTaskHandle:
 
     def mark_running(self) -> None:
         self._repo.mark_running(self._task_id)
+
+    def bump_attempt(self) -> None:
+        self._repo.bump_attempt(self._task_id)
 
     def mark_retry_pending(self, error_message: str | None = None) -> None:
         self._repo.mark_retry_pending(self._task_id, error_message=error_message)

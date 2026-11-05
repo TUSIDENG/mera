@@ -55,6 +55,9 @@ class FakeTask:
     def mark_running(self) -> None:
         self.transitions.append(("running", {}))
 
+    def bump_attempt(self) -> None:
+        self.attempt_count += 1
+
     def mark_retry_pending(self, error_message: str | None = None) -> None:
         self.transitions.append(("retry_pending", {"error": error_message}))
 
