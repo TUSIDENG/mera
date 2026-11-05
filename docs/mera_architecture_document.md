@@ -80,10 +80,10 @@
 用户发起分析时，分析引擎先查库；若该领域尚无快照数据，则**不同步阻塞等待**，而是创建一个获取任务（`fetch_tasks`）异步拉取，完成后再通知用户。流程如下：
 
 ```text
-[ 用户发起分析 (domain + auto_start 选项) ]
+[ 用户发起分析 (权重/用量参数 + auto_start 选项) ]
           │
           ▼
- 查询 model_snapshots 是否存在该 domain 数据
+ 查询 model_snapshots 是否存在模型数据
           │
    ┌──────┴────────────────────┐
    │ 有数据                     │ 无数据
@@ -193,20 +193,23 @@
 
 ```sql
 -- 1. 模型基准与定价快照表 (全局数据，由 Celery Worker 写入/更新)
+-- 一个模型一行：不同榜单/领域的数据聚合在同一行，域信息随来源记录落到 data.sources[key].domain
 CREATE TABLE model_snapshots (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v7(),  -- UUID v7，时间有序
     model_id VARCHAR(100) NOT NULL,        -- 如 'anthropic/claude-3-5-sonnet'
     provider VARCHAR(50) NOT NULL,          -- 如 'anthropic'
-    domain VARCHAR(50) NOT NULL,            -- 如 'coding', 'general_office'
-    benchmark_score NUMERIC(5,2) NOT NULL,  -- 核心排序字段，保留为列；如 93.5
-    data JSONB NOT NULL DEFAULT '{}'::jsonb, -- 仅放“模型级按量”属性: input/output token 单价/延迟/上下文/来源榜单等
+    benchmark_score NUMERIC(5,2),          -- 主榜分（按来源优先级聚合），可空
+    score_source VARCHAR(100),             -- 主榜分来源：来源 key 或 llm:<scorer>
+    scores JSONB NOT NULL DEFAULT '{}'::jsonb, -- 各能力维度分（intelligence/coding/agentic/long_context/image/video）
+    data JSONB NOT NULL DEFAULT '{}'::jsonb, -- 采集原始数据：data.sources[<source_key>] = {raw_model_id, domain, record, benchmark_score, scores}
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     -- 注意：订阅套餐（ChatGPT Plus / Claude Pro 等包月计划）不在此表，见 subscription_plans
 );
 
--- Celery UPSERT 的业务幂等键：同一模型 + 领域只保留一条最新快照
-CREATE UNIQUE INDEX uq_model_snapshot ON model_snapshots (model_id, domain);
-CREATE INDEX idx_model_snapshot_domain ON model_snapshots (domain, benchmark_score DESC);
+-- Celery UPSERT 的业务幂等键：同一模型只保留一行，多来源在 data.sources 内合并
+CREATE UNIQUE INDEX uq_model_snapshot ON model_snapshots (model_id);
+CREATE INDEX idx_model_snapshot_score ON model_snapshots (benchmark_score DESC);
+CREATE INDEX idx_model_snapshot_provider ON model_snapshots (provider);
 CREATE INDEX idx_model_snapshot_data ON model_snapshots USING GIN (data);
 
 -- 2. 用户选型评估历史表 (用户隔离数据，开启 RLS)
@@ -314,7 +317,7 @@ CREATE INDEX idx_subscription_data ON subscription_plans USING GIN (data);
 ```
 
 > **为什么订阅计划不放在 `model_snapshots`**：
-> 1. **粒度不同**：`model_snapshots` 的幂等键是 `(model_id, domain)`，一行 = 一个具体模型在一个领域的基准分与**按量 token 单价**；订阅套餐是**厂商/账号级固定月费**，一个套餐覆盖多个模型（如 ChatGPT Plus 同时含 GPT-4o/4.1/o 系列），还带消息条数/速率上限，强行塞入会破坏 `(model_id, domain)` 唯一键语义。
+> 1. **粒度不同**：`model_snapshots` 的幂等键是 `model_id`，一行 = 一个具体模型（多榜单来源合并，各类能力维度分与**按量 token 单价**都在这一行）；订阅套餐是**厂商/账号级固定月费**，一个套餐覆盖多个模型（如 ChatGPT Plus 同时含 GPT-4o/4.1/o 系列），还带消息条数/速率上限，强行塞入会破坏 `model_id` 唯一键语义。
 > 2. **计费模型不同**：按量价格是“每 1M token 单价”，参与 `tokens × 单价` 线性计算；订阅是固定月费，只在 Break-even 分析中作为常量档位比较，且依赖“用量上限”判断是否够用。
 > 3. **变更频率与来源不同**：订阅档位少、变动慢，以**管理员录入为主**（`source='manual'`，管理面板可维护），可选由采集任务补充；榜单/按量价格变化快、由 Celery 高频抓取。
 >
@@ -350,7 +353,7 @@ CREATE INDEX idx_subscription_data ON subscription_plans USING GIN (data);
 
 | 模块 | 功能 |
 |---|---|
-| 模型数据管理 | 查看/分页/检索全部 `model_snapshots`，按 provider / domain / 模型名过滤，查看单条快照的完整 `data` JSON，手动触发抓取任务 |
+| 模型数据管理 | 查看/分页/检索全部 `model_snapshots`，按 provider / 模型名过滤，查看单条快照的完整 `data` JSON，手动触发抓取任务 |
 | 评估数据管理 | 查看全部用户的 `user_evaluations`，按用户 / 领域 / 状态 / 时间检索，查看报告正文、成本推演结果与引用快照（**管理接口绕过 RLS 的用户隔离**，但受 `admin` 权限严格限制） |
 | 获取任务管理 | 查看全部 `fetch_tasks` 的状态（含 `partial_succeeded`）、`fetch_strategy`、`attempt_count`、`hit_count`、错误信息与进行中任务；对 `captcha_pending` 任务支持在有头浏览器中人工过码后续跑，对 `failed_exhausted` 任务支持手动重新触发 |
 | 基础设施成本 | 查看/维护 `infrastructure_costs`（GPU 租赁/采购、CPU、电费、机柜、带宽），支持人工录入与启停，作为自部署 TCO 测算依据 |

@@ -9,7 +9,6 @@ import { formatCost } from '../lib/utils'
 import AnalysisPage from './AnalysisPage'
 
 const RANKED = {
-  domain: 'general',
   total: 2,
   items: [
     {
@@ -40,7 +39,6 @@ const RANKED = {
 describe('analysis schema', () => {
   it('toRunBody：price_weight 与 benchmark_weight 互补', () => {
     const body = toRunBody({
-      domain: 'general',
       benchmark_weight: 0.6,
       tokens_per_month: 1_000_000,
       input_ratio: 0.7,
@@ -52,7 +50,6 @@ describe('analysis schema', () => {
   it('schema 拒绝非法月用量', () => {
     expect(
       analysisFormSchema.safeParse({
-        domain: 'general',
         benchmark_weight: 0.6,
         tokens_per_month: 0,
         input_ratio: 0.7,

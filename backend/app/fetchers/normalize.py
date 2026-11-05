@@ -210,8 +210,14 @@ def _build_snapshot(
     score = parse_score(values.get("score"))
     score_source: str | None = None
     raw_score = values.get("score")
-    # 采集数据包一层 sources：记录评测的具体变体与原始记录，多来源在仓储层合并
-    source_entry: dict[str, Any] = {"raw_model_id": raw_model_id, "record": item}
+    # 采集数据包一层 sources：记录该来源所属榜单域、评测的具体变体与原始记录，
+    # 多来源/多域在仓储层按 model_id 合并到同一行
+    domain = str(cfg.get("domain") or "general")
+    source_entry: dict[str, Any] = {
+        "raw_model_id": raw_model_id,
+        "domain": domain,
+        "record": item,
+    }
     if score is not None:
         score_source = "score"
     elif raw_score is not None:
@@ -224,10 +230,14 @@ def _build_snapshot(
                 score = Decimal(str(dim_score))
                 score_source = dim
                 break
+    # 来源条目携带该源自己的分，仓储层按来源优先级跨源聚合（AA > openrouter > lmarena > aider）
+    source_entry["benchmark_score"] = float(score) if score is not None else None
+    source_entry["scores"] = scores
+    source_entry["score_source"] = score_source
     return SnapshotRecord(
         model_id=model_id,
         provider=provider,
-        domain=str(cfg.get("domain") or "general"),
+        domain=domain,
         benchmark_score=score,
         scores=scores,
         score_source=score_source,

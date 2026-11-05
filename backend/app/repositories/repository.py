@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, asc, case, func, select, text, true
+from sqlalchemy import ColumnElement, and_, asc, func, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -36,7 +37,8 @@ from app.repositories.dto import (
 def _business_key(record: Any) -> tuple[Any, ...]:
     """各类记录的业务键（与唯一约束一一对应），用于批量 upsert 前去重。"""
     if isinstance(record, SnapshotRecord):
-        return (record.model_id, record.domain)
+        # 一个模型一行：域/来源差异在 data.sources 内合并
+        return (record.model_id,)
     if isinstance(record, ApiPriceRecord):
         return (record.model_id, record.provider)
     if isinstance(record, CostRecord):
@@ -54,16 +56,25 @@ def _dedupe_for_upsert(records: Sequence[Any]) -> list[Any]:
     return list(seen.values())
 
 
-# model_snapshots 的 ORM 列（DTO 中 raw_model_id/source_key 仅用于 fetch_records 留痕）
+# model_snapshots 的 ORM 列（DTO 中 raw_model_id/source_key/domain 仅用于留痕与溯源）
 _SNAPSHOT_ORM_FIELDS = (
     "model_id",
     "provider",
-    "domain",
     "benchmark_score",
     "scores",
     "score_source",
     "data",
 )
+
+# 采集源优先级（数值越小越权威）：主榜分与各维度分统一按此顺序取第一个非空来源。
+# openrouter 附带的是 Artificial Analysis 指数（与 AA 站点同源），故排在 AA 之后。
+_SOURCE_PRIORITY = {
+    "artificial_analysis": 0,
+    "openrouter": 1,
+    "lmarena": 2,
+    "aider_leaderboard": 3,
+}
+_DEFAULT_SOURCE_PRIORITY = 9
 
 
 def _snapshot_orm_dict(record: SnapshotRecord) -> dict[str, Any]:
@@ -73,42 +84,76 @@ def _snapshot_orm_dict(record: SnapshotRecord) -> dict[str, Any]:
 def _snapshot_payload(record: SnapshotRecord) -> dict[str, Any]:
     """fetch_records.record 落库载荷（Decimal 转 float 以适配 JSONB）。"""
     payload = _snapshot_orm_dict(record)
+    # 域不再占列，但留痕载荷保留该字段便于回溯「这条记录来自哪个榜」
+    payload["domain"] = record.domain
     if payload["benchmark_score"] is not None:
         payload["benchmark_score"] = float(payload["benchmark_score"])
     return payload
 
 
-def _merge_snapshot(existing: ModelSnapshot, record: SnapshotRecord) -> None:
-    """合并式更新（通用路径）：scores 新值 null 维度不覆盖旧值；data.sources 按键合并
-    （不同 source_key 共存，同源重采覆盖该 key），其余顶层键浅合并；
-    已被 LLM 打分（score_source 以 llm: 开头）的行保留展示分，仅合并 data。"""
-    is_llm_scored = (existing.score_source or "").startswith("llm:")
-    if not is_llm_scored:
-        if record.benchmark_score is not None:
-            existing.benchmark_score = record.benchmark_score
-        if record.score_source is not None:
-            existing.score_source = record.score_source
-        merged_scores = dict(existing.scores or {})
-        for dim, value in (record.scores or {}).items():
-            if value is not None:
-                merged_scores[dim] = value
-        existing.scores = merged_scores
-    existing.data = _merge_data(existing.data, record.data)
+def _merge_source_entry(old: Any, new: Any) -> dict[str, Any]:
+    """同源重采合并条目：覆盖原始记录，但维度分中 null 不覆盖旧值（与行级语义一致）。"""
+    if not isinstance(old, dict):
+        return new
+    if not isinstance(new, dict):
+        return old
+    merged = {**old, **new}
+    old_scores = old.get("scores") or {}
+    new_scores = new.get("scores") or {}
+    if old_scores or new_scores:
+        merged["scores"] = {
+            **old_scores,
+            **{dim: value for dim, value in new_scores.items() if value is not None},
+        }
+    if merged.get("benchmark_score") is None:
+        merged["benchmark_score"] = old.get("benchmark_score")
+    return merged
 
 
 def _merge_data(old: dict[str, Any] | None, new: dict[str, Any] | None) -> dict[str, Any]:
-    """data 合并：顶层浅合并，sources 层级按键合并（多来源共存）。"""
+    """data 合并：顶层浅合并，sources 层级按键合并（多来源/多域共存，同源重采覆盖）。"""
     old = old or {}
     new = new or {}
     merged = {**old, **new}
     old_sources = old.get("sources")
     new_sources = new.get("sources")
     if isinstance(old_sources, dict) or isinstance(new_sources, dict):
+        old_sources = old_sources if isinstance(old_sources, dict) else {}
+        new_sources = new_sources if isinstance(new_sources, dict) else {}
         merged["sources"] = {
-            **(old_sources if isinstance(old_sources, dict) else {}),
-            **(new_sources if isinstance(new_sources, dict) else {}),
+            key: _merge_source_entry(old_sources.get(key), value)
+            for key, value in {**old_sources, **new_sources}.items()
         }
     return merged
+
+
+def _aggregate_from_sources(
+    data: dict[str, Any] | None,
+) -> tuple[Decimal | None, dict[str, float], str | None]:
+    """按来源优先级从 data.sources 聚合主榜分与维度分（纯函数）。
+
+    每个维度取优先级最高来源的非空值；主榜分取优先级最高来源的非空分。
+    返回 (主榜分, 维度分, 主榜分来源标签)。
+    """
+    sources = (data or {}).get("sources") or {}
+    ordered = sorted(
+        sources.items(),
+        key=lambda kv: _SOURCE_PRIORITY.get(kv[0], _DEFAULT_SOURCE_PRIORITY),
+    )
+    dims: dict[str, float] = {}
+    benchmark: Decimal | None = None
+    label: str | None = None
+    for key, entry in ordered:
+        if not isinstance(entry, dict):
+            continue
+        for dim, value in (entry.get("scores") or {}).items():
+            if value is not None and dim not in dims:
+                dims[dim] = value
+        if benchmark is None and entry.get("benchmark_score") is not None:
+            benchmark = Decimal(str(entry["benchmark_score"]))
+            own = entry.get("score_source")
+            label = f"{key}:{own}" if own else key
+    return benchmark, dims, label
 
 
 class Repository:
@@ -118,67 +163,40 @@ class Repository:
     def upsert_snapshots(self, records: Sequence[SnapshotRecord]) -> int:
         if not records:
             return 0
-        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
-            self._upsert_snapshots_pg(records)
-        else:
-            self._upsert_snapshots_generic(records)
-        return len(records)
-
-    def _upsert_snapshots_pg(self, records: Sequence[SnapshotRecord]) -> None:
-        values = [_snapshot_orm_dict(record) for record in _dedupe_for_upsert(records)]
-        stmt = pg_insert(ModelSnapshot).values(values)
-        excluded = stmt.excluded
-        is_llm = ModelSnapshot.score_source.like("llm:%")
-        # scores 合并：剔除新值中的 null 维度后 || 到旧值（null 不覆盖已有维度分）
-        non_null_scores = text(
-            "(SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb) "
-            "FROM jsonb_each(excluded.scores) AS e WHERE e.value <> 'null'::jsonb)"
-        )
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_model_snapshot",
-            set_={
-                # 首采为准（provider 非空，COALESCE 恒保留旧值）
-                "provider": func.coalesce(ModelSnapshot.provider, excluded.provider),
-                # LLM 已打分的行保留展示分；否则新值非空覆盖
-                "benchmark_score": case(
-                    (is_llm, ModelSnapshot.benchmark_score),
-                    else_=func.coalesce(excluded.benchmark_score, ModelSnapshot.benchmark_score),
-                ),
-                "score_source": case(
-                    (is_llm, ModelSnapshot.score_source),
-                    else_=func.coalesce(excluded.score_source, ModelSnapshot.score_source),
-                ),
-                "scores": case(
-                    (is_llm, ModelSnapshot.scores),
-                    else_=ModelSnapshot.scores.op("||")(non_null_scores),
-                ),
-                # data 合并：顶层浅合并保留 llm_score 等键，sources 层级按键合并
-                # （不同 source_key 共存，同源重采覆盖该 key）
-                "data": text(
-                    "(model_snapshots.data - 'sources') || (excluded.data - 'sources') || "
-                    "jsonb_build_object('sources', "
-                    "COALESCE(model_snapshots.data->'sources', '{}'::jsonb) || "
-                    "COALESCE(excluded.data->'sources', '{}'::jsonb))"
-                ),
-                "updated_at": func.now(),
-            },
-        )
-        self.session.execute(stmt)
-
-    def _upsert_snapshots_generic(self, records: Sequence[SnapshotRecord]) -> None:
+        # 一个模型一行：同批次内不同来源的记录按 model_id 合并，各自 sources 条目保留
         for record in records:
             existing = self.session.scalar(
-                select(ModelSnapshot).where(
-                    and_(
-                        ModelSnapshot.model_id == record.model_id,
-                        ModelSnapshot.domain == record.domain,
-                    )
-                )
+                select(ModelSnapshot).where(ModelSnapshot.model_id == record.model_id)
             )
             if existing is None:
                 self.session.add(ModelSnapshot(**_snapshot_orm_dict(record)))
             else:
-                _merge_snapshot(existing, record)
+                existing.provider = existing.provider or record.provider
+                existing.data = _merge_data(existing.data, record.data)
+        # 合并 sources 后按来源优先级重算主榜分与维度分（LLM 打分的行不覆盖）
+        self._recompute_snapshot_scores({record.model_id for record in records})
+        return len(records)
+
+    def _recompute_snapshot_scores(self, model_ids: set[str]) -> None:
+        """合并后按来源优先级重算展示分：LLM 已打分的行保持 LLM 分不动。
+
+        sources 内无分数信息时（历史行/无分来源）保留原值，避免把已有分数抹掉。
+        """
+        rows = self.session.scalars(
+            select(ModelSnapshot)
+            .where(ModelSnapshot.model_id.in_(sorted(model_ids)))
+            .execution_options(populate_existing=True)
+        ).all()
+        for row in rows:
+            if (row.score_source or "").startswith("llm:"):
+                continue
+            benchmark, scores, label = _aggregate_from_sources(row.data)
+            if benchmark is not None:
+                row.benchmark_score = benchmark
+            if scores:
+                row.scores = scores
+            if label is not None:
+                row.score_source = label
 
     def insert_fetch_records(
         self, task_id: uuid.UUID, records: Sequence[SnapshotRecord]
@@ -190,7 +208,6 @@ class Repository:
                 source_key=record.source_key or "",
                 model_id=record.model_id,
                 raw_model_id=record.raw_model_id,
-                domain=record.domain,
                 record=_snapshot_payload(record),
             )
             for record in records
@@ -199,19 +216,13 @@ class Repository:
         self.session.flush()
         return len(rows)
 
-    def get_snapshot(self, model_id: str, domain: str) -> ModelSnapshot | None:
-        stmt = select(ModelSnapshot).where(
-            and_(
-                ModelSnapshot.model_id == model_id,
-                ModelSnapshot.domain == domain,
-            )
-        )
+    def get_snapshot(self, model_id: str) -> ModelSnapshot | None:
+        stmt = select(ModelSnapshot).where(ModelSnapshot.model_id == model_id)
         return self.session.scalar(stmt)
 
     def apply_llm_score(
         self,
         model_id: str,
-        domain: str,
         *,
         overall: float | None,
         dims: dict[str, float | None],
@@ -220,9 +231,9 @@ class Repository:
     ) -> None:
         """写入 LLM 打分结果：scores/dims + 主榜分 + score_source=llm:<scorer>，
         打分理由留痕在 data.llm_score；采集到的原始维度分仍保留在 data.sources。"""
-        snapshot = self.get_snapshot(model_id, domain)
+        snapshot = self.get_snapshot(model_id)
         if snapshot is None:
-            raise ValueError(f"模型快照不存在: {model_id}/{domain}")
+            raise ValueError(f"模型快照不存在: {model_id}")
         snapshot.scores = dims
         snapshot.benchmark_score = overall
         snapshot.score_source = f"llm:{scorer}"
@@ -269,14 +280,14 @@ class Repository:
         )
         return list(self.session.scalars(stmt).all()), int(total or 0)
 
-    def fetch_record_keys_by_task(self, task_id: uuid.UUID) -> list[tuple[str, str]]:
-        """本次任务采到的去重 (model_id, domain)，用于触发 LLM 离线打分。"""
+    def fetch_record_model_ids_by_task(self, task_id: uuid.UUID) -> list[str]:
+        """本次任务采到的去重 model_id，用于触发 LLM 离线打分。"""
         stmt = (
-            select(FetchRecord.model_id, FetchRecord.domain)
+            select(FetchRecord.model_id)
             .where(FetchRecord.task_id == task_id)
             .distinct()
         )
-        return [(row.model_id, row.domain) for row in self.session.execute(stmt)]
+        return [row[0] for row in self.session.execute(stmt)]
 
     def upsert_prices(self, records: Sequence[ApiPriceRecord]) -> int:
         """API 按量价格 upsert，业务键 (model_id, provider)。"""
@@ -592,11 +603,9 @@ class Repository:
     def mark_captcha_pending(self, task_id: uuid.UUID) -> FetchTask:
         return self._transition(task_id, FetchTaskStatus.CAPTCHA_PENDING.value)
 
-    def latest_snapshots(self, domain: str) -> list[ModelSnapshot]:
-        stmt = (
-            select(ModelSnapshot)
-            .where(ModelSnapshot.domain == domain)
-            .order_by(ModelSnapshot.benchmark_score.desc(), asc(ModelSnapshot.model_id))
+    def latest_snapshots(self) -> list[ModelSnapshot]:
+        stmt = select(ModelSnapshot).order_by(
+            ModelSnapshot.benchmark_score.desc().nulls_last(), asc(ModelSnapshot.model_id)
         )
         return list(self.session.scalars(stmt).all())
 
@@ -617,15 +626,11 @@ class Repository:
     # --- M04 API 查询扩展 ---
 
     def list_snapshots(
-        self, domain: str, *, limit: int, offset: int
+        self, *, limit: int, offset: int
     ) -> tuple[list[ModelSnapshot], int]:
-        condition = ModelSnapshot.domain == domain
-        total = self.session.scalar(
-            select(func.count()).select_from(ModelSnapshot).where(condition)
-        )
+        total = self.session.scalar(select(func.count()).select_from(ModelSnapshot))
         stmt = (
             select(ModelSnapshot)
-            .where(condition)
             .order_by(
                 ModelSnapshot.benchmark_score.desc().nulls_last(),
                 asc(ModelSnapshot.model_id),
@@ -636,11 +641,7 @@ class Repository:
         return list(self.session.scalars(stmt).all()), int(total or 0)
 
     def snapshots_by_model(self, model_id: str) -> list[ModelSnapshot]:
-        stmt = (
-            select(ModelSnapshot)
-            .where(ModelSnapshot.model_id == model_id)
-            .order_by(asc(ModelSnapshot.domain))
-        )
+        stmt = select(ModelSnapshot).where(ModelSnapshot.model_id == model_id)
         return list(self.session.scalars(stmt).all())
 
     def list_tasks(

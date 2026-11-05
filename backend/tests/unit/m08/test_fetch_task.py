@@ -164,30 +164,30 @@ class TestLlmScoringTrigger:
 
         task = make_task_row()
         env = wire_task(task, make_site([("api", FakeFetcher())]))
-        env.repo.fetch_keys = [("gpt-4o", "general"), ("claude-opus-5", "general")]
+        env.repo.fetch_model_ids = ["gpt-4o", "claude-opus-5"]
         monkeypatch.setattr(
             "app.tasks.fetch.get_settings",
             lambda: Settings(llm_scorer_enabled=True),
         )
-        enqueued: list[tuple[str, str]] = []
+        enqueued: list[str] = []
         monkeypatch.setattr(
             "app.tasks.score.enqueue_score",
-            lambda model_id, domain: enqueued.append((model_id, domain)),
+            lambda model_id: enqueued.append(model_id),
         )
 
         result = run_fetch_task.delay(str(task.id))
 
         assert result.result == "succeeded"
-        assert enqueued == [("gpt-4o", "general"), ("claude-opus-5", "general")]
+        assert enqueued == ["gpt-4o", "claude-opus-5"]
 
     def test_skipped_when_disabled(self, wire_task, monkeypatch):
         task = make_task_row()
         env = wire_task(task, make_site([("api", FakeFetcher())]))
-        env.repo.fetch_keys = [("gpt-4o", "general")]
-        enqueued: list[tuple[str, str]] = []
+        env.repo.fetch_model_ids = ["gpt-4o"]
+        enqueued: list[str] = []
         monkeypatch.setattr(
             "app.tasks.score.enqueue_score",
-            lambda model_id, domain: enqueued.append((model_id, domain)),
+            lambda model_id: enqueued.append(model_id),
         )
 
         result = run_fetch_task.delay(str(task.id))

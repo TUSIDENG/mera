@@ -19,6 +19,9 @@ class ScorerSpec:
     # OpenAI 兼容端点；None 表示官方默认端点
     base_url: str | None = None
     family: str = "openai"  # openai / gemini
+    # with_structured_output 的 method；None 用 langchain 默认（json_schema）。
+    # deepseek 端点不支持 response_format=json_schema，需退化为 function_calling。
+    structured_output_method: str | None = None
 
 
 SCORER_REGISTRY: dict[str, ScorerSpec] = {
@@ -27,6 +30,7 @@ SCORER_REGISTRY: dict[str, ScorerSpec] = {
         default_model="deepseek-chat",
         api_key_attr="deepseek_api_key",
         base_url="https://api.deepseek.com/v1",
+        structured_output_method="function_calling",
     ),
     "chatgpt": ScorerSpec(
         provider="chatgpt",

@@ -31,13 +31,13 @@ def run_analysis(
     identity: Annotated[Identity, Depends(get_current_identity)],
     repo: Annotated[Repository, Depends(get_repository)],
 ) -> AnalysisRunResponse:
-    """读取 domain 最新快照与 API 价格表并返回排名；DB 读取只留在本路由层。"""
+    """读取榜单快照与 API 价格表并返回排名；DB 读取只留在本路由层。"""
     _ = identity
     prices = {
         (price.model_id, price.provider): price for price in repo.latest_prices()
     }
     models = []
-    for snapshot in repo.latest_snapshots(payload.domain):
+    for snapshot in repo.latest_snapshots():
         if snapshot.benchmark_score is None:
             continue  # 无分模型不参与加权排名（区别于 0 分）
         price = prices.get((snapshot.model_id, snapshot.provider))
@@ -60,7 +60,6 @@ def run_analysis(
         Weights(benchmark=payload.benchmark_weight, price=payload.price_weight),
     )
     return AnalysisRunResponse(
-        domain=payload.domain,
         items=[RankedModelOut.model_validate(item) for item in ranked],
         total=len(ranked),
     )

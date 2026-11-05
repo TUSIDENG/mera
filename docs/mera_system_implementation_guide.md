@@ -158,8 +158,8 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 |---|---|
 | 目标与边界 | ORM 模型、Alembic 迁移、`Repository` 数据访问；**不含业务规则，不含 RLS 策略本身（策略在迁移 SQL）** |
 | 代码位置 | `app/db/models/`、`app/db/alembic/`、`app/repositories/repository.py` |
-| 对外接口 | 表：`model_snapshots`（模型基准/按量单价）、`infrastructure_costs`、`subscription_plans`（订阅套餐，独立表）、`fetch_tasks`、`user_evaluations`（均含 `data` JSONB、UUIDv7 主键）。仓储：`upsert_snapshots(records)->int`、`upsert_costs(records)->int`、`upsert_subscription_plans(records)->int`、`create_task/mark_succeeded/mark_partial_succeeded/mark_failed_exhausted/mark_captcha_pending`、`latest_snapshots(domain)->list`、`cheapest_active_plan(provider)->SubscriptionPlan|None` |
-| 实现要点 | UPSERT 幂等键：快照=(model_id, domain)，成本=(cost_type,name,region)，套餐=(provider,plan_key,billing_cycle)；`fetch_tasks` 增 `hit_count INT DEFAULT 0` 列与 CHECK（`failed_exhausted` 时 `hit_count=0`）；任务状态机 `pending→running→succeeded/partial_succeeded/captcha_pending→failed_exhausted`（`partial_succeeded`：达到最大尝试次数但 `hit_count≥1`，或数据被截断），非法迁移抛 `InvalidTransition`。订阅套餐不进 `model_snapshots`（粒度为厂商账号级、一个套餐覆盖多模型且带用量上限） |
+| 对外接口 | 表：`model_snapshots`（模型基准/按量单价）、`infrastructure_costs`、`subscription_plans`（订阅套餐，独立表）、`fetch_tasks`、`user_evaluations`（均含 `data` JSONB、UUIDv7 主键）。仓储：`upsert_snapshots(records)->int`、`upsert_costs(records)->int`、`upsert_subscription_plans(records)->int`、`create_task/mark_succeeded/mark_partial_succeeded/mark_failed_exhausted/mark_captcha_pending`、`latest_snapshots()->list`、`cheapest_active_plan(provider)->SubscriptionPlan|None` |
+| 实现要点 | UPSERT 幂等键：快照=(model_id)，成本=(cost_type,name,region)，套餐=(provider,plan_key,billing_cycle)；`fetch_tasks` 增 `hit_count INT DEFAULT 0` 列与 CHECK（`failed_exhausted` 时 `hit_count=0`）；任务状态机 `pending→running→succeeded/partial_succeeded/captcha_pending→failed_exhausted`（`partial_succeeded`：达到最大尝试次数但 `hit_count≥1`，或数据被截断），非法迁移抛 `InvalidTransition`。订阅套餐不进 `model_snapshots`（粒度为厂商账号级、一个套餐覆盖多模型且带用量上限） |
 | 依赖 | M01 |
 | 下游 | M04 M05 M06 M08 M09 M10 |
 | 测试方案 | 单测：SQLite/内存会话验证三类 UPSERT 幂等（重复键行数不变、值更新）、状态机全部合法/非法迁移（重点：`hit_count≥1` 到顶只能 `partial_succeeded` 不得 `failed_exhausted`；`hit_count=0` 到顶只能 `failed_exhausted`）、部分冲突批量、事务回滚；集成：真实 PG 验证 JSONB、RLS 隔离、UUIDv7、`ck_fetch_terminal_hit_count` 约束 |
@@ -185,7 +185,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 |---|---|
 | 目标与边界 | 路由、pydantic 请求/响应模型、状态码、依赖装配；**业务计算委托 M09，数据访问委托 M02** |
 | 代码位置 | `app/api/v1/`、`app/schemas/` |
-| 对外接口（路由表） | `GET /api/v1/models?domain=`（榜单）、`GET /api/v1/models/{id}/snapshots`（历史）、`POST /api/v1/fetch-tasks`（手动触发采集，202）、`GET /api/v1/fetch-tasks`、`GET/POST /api/v1/evaluations`（用户评测 CRUD）、`GET /api/v1/subscription-plans?provider=`（活跃套餐，供前端比价展示）、`POST /api/v1/analysis/run`（触发评分，返回结果）、`POST /internal/fetch/callback/{task_id}`（RPA 回调，内网鉴权）；管理端（admin 角色）：`GET/PUT /api/v1/admin/subscription-plans`、`GET/PUT /api/v1/admin/infrastructure-costs`、手动重触发 `failed_exhausted` 任务 |
+| 对外接口（路由表） | `GET /api/v1/models`（榜单，一个模型一行）、`GET /api/v1/models/{id}/snapshots`（历史）、`POST /api/v1/fetch-tasks`（手动触发采集，202）、`GET /api/v1/fetch-tasks`、`GET/POST /api/v1/evaluations`（用户评测 CRUD）、`GET /api/v1/subscription-plans?provider=`（活跃套餐，供前端比价展示）、`POST /api/v1/analysis/run`（触发评分，返回结果）、`POST /internal/fetch/callback/{task_id}`（RPA 回调，内网鉴权）；管理端（admin 角色）：`GET/PUT /api/v1/admin/subscription-plans`、`GET/PUT /api/v1/admin/infrastructure-costs`、手动重触发 `failed_exhausted` 任务 |
 | 实现要点 | 分页参数统一；业务异常 → 3.1 映射；入队用 `send_task` 按队列名路由 |
 | 依赖 | M02 M03（M09 完成前 analysis 路由可返回 501 占位） |
 | 测试方案 | TestClient + `dependency_overrides` 替换 identity 与 repo（M02 未就绪时用 Mock）：参数校验 422、无 token 401、repo 业务异常 → 404/409、入队调用被记录 |
@@ -334,7 +334,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 下游 | M04 |
 | 测试方案 | minmax 边界（全相同值→0.5）；TCO 各成本项公式断言；权重全打价格→最低价第一；break_even：无可用套餐→None / 多套餐取最低价 / 用量上限低于输入量级时标记“不够用”；性质测试（任意输入分值∈[0,1]、确定性）；golden case：5 模型预制输入→固定排序快照 |
 | 验收清单 | [x] 覆盖率 ≥90% [x] golden case 入库存档 |
-| 实现状态 | **✅ 已实现（2026-11）**：`app/scoring/models.py`（Weights/ModelInput/RankInputs/RankedModel/InfraCost/PlanInput/BreakEvenResult，全部 frozen dataclass）+ `app/scoring/engine.py`（零 I/O 纯函数）。M04 `/api/v1/analysis/run` 已由 501 占位改为真实实现：`app/schemas/analysis.py` + 路由读取 `repo.latest_snapshots(domain)`，把 `data.input_price/output_price`（字符串每 token 单价）转 `Decimal` 后交引擎。口径：榜单 minmax，空/单值/全相同→0.5；价格 minmax 取反，input/output 任一缺项→`price_norm=0.5` 中性且 `monthly_cost=None`、不参与价格极值；月成本 = `tokens_per_month × (input_ratio×input_price + (1-input_ratio)×output_price)`；权重和容差 1e-6、负值或 >1 抛 `InvalidWeights`（422），同分按 `model_id` 字典序稳定排序。`break_even_subscription` 只考虑 `monthly_price < api_cost` 的套餐并取最低月费（同价按 provider/plan_key 稳定）；`sufficient = tokens_limit is None or tokens_limit >= tokens_per_month`；无更便宜套餐→None。单测 `tests/unit/m09/` 28 用例（含 `golden_rank.json` 5 模型快照），全量单测 371 绿，scoring 覆盖率 100%，ruff/mypy 通过 |
+| 实现状态 | **✅ 已实现（2026-11）**：`app/scoring/models.py`（Weights/ModelInput/RankInputs/RankedModel/InfraCost/PlanInput/BreakEvenResult，全部 frozen dataclass）+ `app/scoring/engine.py`（零 I/O 纯函数）。M04 `/api/v1/analysis/run` 已由 501 占位改为真实实现：`app/schemas/analysis.py` + 路由读取 `repo.latest_snapshots()`，把 `data.input_price/output_price`（字符串每 token 单价）转 `Decimal` 后交引擎。口径：榜单 minmax，空/单值/全相同→0.5；价格 minmax 取反，input/output 任一缺项→`price_norm=0.5` 中性且 `monthly_cost=None`、不参与价格极值；月成本 = `tokens_per_month × (input_ratio×input_price + (1-input_ratio)×output_price)`；权重和容差 1e-6、负值或 >1 抛 `InvalidWeights`（422），同分按 `model_id` 字典序稳定排序。`break_even_subscription` 只考虑 `monthly_price < api_cost` 的套餐并取最低月费（同价按 provider/plan_key 稳定）；`sufficient = tokens_limit is None or tokens_limit >= tokens_per_month`；无更便宜套餐→None。单测 `tests/unit/m09/` 28 用例（含 `golden_rank.json` 5 模型快照），全量单测 371 绿，scoring 覆盖率 100%，ruff/mypy 通过 |
 
 ### M10 通知服务
 
@@ -358,7 +358,7 @@ pydantic-settings 定义 `Settings`（数据库/Redis/Casdoor/SMTP/限频等，�
 | 依赖 | M04 |
 | 测试方案 | Vitest + Testing Library；MSW mock `/api` 响应；组件测：榜单 Table 渲染/排序（断言自己实现的 hook 逻辑 + `data-testid`，Radix 交互用 `userEvent` 驱动）、表单校验（zod schema 纯函数直测）、`<Chart>` mock Recharts 实例只断言收到正确数据；store reducer 单测 |
 | 验收清单 | [x] 核心页面组件单测通过 [x] MSW 下无真实网络请求 |
-| 实现状态 | **✅ 已实现（2026-11）**：`frontend/`（React 18 + Vite + TS + Tailwind + shadcn 风格组件 + zustand + TanStack Table + RHF/zod + Recharts + sonner）。OIDC 授权码 + PKCE 纯前端实现（`lib/oidc.ts`，token 存 sessionStorage），运行时配置 `window.MERA_CONFIG` 由容器 entrypoint 生成 `/config.js`；nginx 反代 `/api/` 并 SPA fallback。页面：/login、/callback、/analysis（智能分析：权重/月用量/输入占比表单 → M09 加权排名表，首个菜单项与默认路由）、/leaderboard（domain tabs + 排序分页）、/models/:id（历史折线）、/compare（雷达）、/costs（套餐表）、/tasks（10s 轮询 + 触发采集表单）。单测 31 用例全绿，`npm run build` 与镜像构建通过；compose 全栈 E2E：OIDC 登录 → 触发 openrouter 采集 → 榜单展示 452 条快照 |
+| 实现状态 | **✅ 已实现（2026-11）**：`frontend/`（React 18 + Vite + TS + Tailwind + shadcn 风格组件 + zustand + TanStack Table + RHF/zod + Recharts + sonner）。OIDC 授权码 + PKCE 纯前端实现（`lib/oidc.ts`，token 存 sessionStorage），运行时配置 `window.MERA_CONFIG` 由容器 entrypoint 生成 `/config.js`；nginx 反代 `/api/` 并 SPA fallback。页面：/login、/callback、/analysis（智能分析：权重/月用量/输入占比表单 → M09 加权排名表，首个菜单项与默认路由）、/leaderboard（6 维榜单 + 排序分页）、/models/:id（历史折线）、/compare（雷达）、/costs（套餐表）、/tasks（10s 轮询 + 触发采集表单）。单测 31 用例全绿，`npm run build` 与镜像构建通过；compose 全栈 E2E：OIDC 登录 → 触发 openrouter 采集 → 榜单展示 452 条快照 |
 
 ### M12 部署与 CI
 

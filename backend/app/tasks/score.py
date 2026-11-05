@@ -17,13 +17,13 @@ from app.worker import celery_app
 logger = get_logger(__name__)
 
 
-def enqueue_score(model_id: str, domain: str) -> None:
+def enqueue_score(model_id: str) -> None:
     """生产者入口：路由到 default 队列（worker.py task_routes 兜底）。"""
-    celery_app.send_task(SCORE_TASK_NAME, args=[model_id, domain])
+    celery_app.send_task(SCORE_TASK_NAME, args=[model_id])
 
 
 @celery_app.task(name=SCORE_TASK_NAME, bind=True, max_retries=2, retry_backoff=True)
-def run_score_task(self, model_id: str, domain: str) -> bool | None:
+def run_score_task(self, model_id: str) -> bool | None:
     """执行一次 LLM 打分；开关关闭返回 None，打分成功/跳过返回 True/False。"""
     settings = get_settings()
     if not settings.llm_scorer_enabled:
@@ -32,7 +32,7 @@ def run_score_task(self, model_id: str, domain: str) -> bool | None:
     with factory() as session:
         repo = Repository(session)
         try:
-            scored = score_snapshot(repo, settings, model_id=model_id, domain=domain)
+            scored = score_snapshot(repo, settings, model_id=model_id)
             session.commit()
             return scored
         except Exception as exc:  # noqa: BLE001  # 重试耗尽后仅记日志，行保持采集回落分
@@ -42,6 +42,6 @@ def run_score_task(self, model_id: str, domain: str) -> bool | None:
             except self.MaxRetriesExceededError:
                 logger.exception(
                     "LLM 打分重试耗尽，保持采集回落分",
-                    extra={"model_id": model_id, "domain": domain},
+                    extra={"model_id": model_id},
                 )
                 return None

@@ -42,7 +42,6 @@ def make_snapshot(**overrides: Any) -> ModelSnapshot:
         "id": uuid.uuid4(),
         "model_id": "gpt-4o",
         "provider": "openai",
-        "domain": "coding",
         "benchmark_score": Decimal("95.50"),
         "scores": {},
         "score_source": None,
@@ -160,16 +159,16 @@ class FakeRepo:
     def _log(self, method: str, **kwargs: Any) -> None:
         self.calls.append((method, kwargs))
 
-    def list_snapshots(self, domain: str, *, limit: int, offset: int):
-        self._log("list_snapshots", domain=domain, limit=limit, offset=offset)
+    def list_snapshots(self, *, limit: int, offset: int):
+        self._log("list_snapshots", limit=limit, offset=offset)
         return self.snapshots, len(self.snapshots)
 
     def snapshots_by_model(self, model_id: str):
         self._log("snapshots_by_model", model_id=model_id)
         return self.snapshots
 
-    def latest_snapshots(self, domain: str):
-        self._log("latest_snapshots", domain=domain)
+    def latest_snapshots(self):
+        self._log("latest_snapshots")
         return self.snapshots
 
     def latest_prices(self):

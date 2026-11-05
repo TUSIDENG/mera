@@ -10,7 +10,6 @@ class AnalysisRunRequest(BaseModel):
 
     model_config = ConfigDict(allow_inf_nan=False)
 
-    domain: str = "general"
     benchmark_weight: float = 0.6
     price_weight: float = 0.4
     tokens_per_month: int = Field(default=1_000_000, ge=1)
@@ -34,8 +33,7 @@ class RankedModelOut(BaseModel):
 
 
 class AnalysisRunResponse(BaseModel):
-    """分析结果：domain 原样回显，items 按 rank 升序。"""
+    """分析结果：items 按 rank 升序。"""
 
-    domain: str
     items: list[RankedModelOut]
     total: int

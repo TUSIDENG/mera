@@ -5,11 +5,10 @@ export interface Snapshot {
   id: string
   model_id: string
   provider: string
-  domain: string
   benchmark_score: string | null
-  /** 各维度分（intelligence/coding/agentic/image/video 等，LLM 打分后为其产出值，缺失为 null） */
+  /** 各维度分（intelligence/coding/agentic/long_context/image/video），缺失为 null */
   scores: Record<string, number | null>
-  /** 主榜分来源：score/维度名 为采集回落，llm:<provider>/<model> 为 LLM 离线打分 */
+  /** 主榜分来源：<来源>:<维度> 为采集聚合，llm:<provider>/<model> 为 LLM 离线打分 */
   score_source: string | null
   /** data.sources 为各平台采集详情，data.llm_score 为 LLM 打分留痕 */
   data: Record<string, unknown>
@@ -19,7 +18,12 @@ export interface Snapshot {
 /** 单平台采集条目（Snapshot.data.sources 的值） */
 export interface SourceEntry {
   raw_model_id: string | null
+  /** 该来源所属榜单域（溯源用） */
+  domain?: string
   score_raw?: unknown
+  benchmark_score?: number | null
+  scores?: Record<string, number | null>
+  score_source?: string | null
   record: Record<string, unknown>
 }
 
@@ -39,19 +43,16 @@ export interface FetchRecord {
   source_key: string
   model_id: string
   raw_model_id: string | null
-  domain: string
   record: Record<string, unknown>
   created_at: string
 }
 
-/** 按 domain 拉取榜单（默认拉满 100 条做客户端排序/分页） */
-export function listModels(domain: string, page = 1, pageSize = 100) {
-  return apiFetch<Page<Snapshot>>(
-    `/models?domain=${encodeURIComponent(domain)}&page=${page}&page_size=${pageSize}`,
-  )
+/** 拉取榜单（一个模型一行，默认拉满 100 条做客户端排序/分页） */
+export function listModels(page = 1, pageSize = 100) {
+  return apiFetch<Page<Snapshot>>(`/models?page=${page}&page_size=${pageSize}`)
 }
 
-/** 单模型全部 domain 的历史快照 */
+/** 单模型当前快照（一个模型一行，返回 0 或 1 条） */
 export function listModelSnapshots(modelId: string) {
   return apiFetch<Snapshot[]>(`/models/${encodeURIComponent(modelId)}/snapshots`)
 }

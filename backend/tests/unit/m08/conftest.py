@@ -86,7 +86,7 @@ class FakeRepo:
         self.transitions: list[str] = []
         self.error_message: str | None = None
         self.upserts: list[tuple[str, int]] = []
-        self.fetch_keys: list[tuple[str, str]] = []
+        self.fetch_model_ids: list[str] = []
 
     def get_task(self, task_id: uuid.UUID) -> FetchTask | None:
         return self.task
@@ -149,8 +149,8 @@ class FakeRepo:
         self.upserts.append(("fetch_records", len(records)))
         return len(records)
 
-    def fetch_record_keys_by_task(self, task_id: uuid.UUID) -> list[tuple[str, str]]:
-        return self.fetch_keys
+    def fetch_record_model_ids_by_task(self, task_id: uuid.UUID) -> list[str]:
+        return self.fetch_model_ids
 
     def upsert_costs(self, records: Any) -> int:
         self.upserts.append(("costs", len(records)))

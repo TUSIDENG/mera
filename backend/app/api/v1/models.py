@@ -1,10 +1,10 @@
-"""M04 模型榜单路由：当前榜单与单模型历史快照。"""
+"""M04 模型榜单路由：当前榜单、单模型快照与采集历史。"""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from app.api.depends import get_repository
 from app.repositories.repository import Repository
@@ -18,12 +18,9 @@ router = APIRouter(tags=["models"])
 def list_models(
     repo: Annotated[Repository, Depends(get_repository)],
     page_params: Annotated[PageParams, Depends()],
-    domain: Annotated[str, Query(min_length=1, max_length=50)],
 ) -> Page[SnapshotOut]:
-    """按 domain 返回榜单快照（benchmark_score 降序）。"""
-    items, total = repo.list_snapshots(
-        domain, limit=page_params.limit, offset=page_params.offset
-    )
+    """模型榜单：一个模型一行（多来源已在 data.sources 内合并），按主榜分降序。"""
+    items, total = repo.list_snapshots(limit=page_params.limit, offset=page_params.offset)
     return Page(
         items=[SnapshotOut.model_validate(item) for item in items],
         total=total,
@@ -37,7 +34,7 @@ def list_model_snapshots(
     model_id: str,
     repo: Annotated[Repository, Depends(get_repository)],
 ) -> list[SnapshotOut]:
-    """单模型全部 domain 的历史快照。"""
+    """单模型当前快照（一个模型一行，列表长度为 0 或 1，保留列表形态兼容旧调用）。"""
     items = repo.snapshots_by_model(model_id)
     return [SnapshotOut.model_validate(item) for item in items]
 

@@ -113,7 +113,14 @@ class TestNormalizeRecords:
                 score_source="score",
                 data={
                     "sources": {
-                        "demo": {"raw_model_id": "GPT-4o", "record": raw[0]},
+                        "demo": {
+                            "raw_model_id": "GPT-4o",
+                            "domain": "coding",
+                            "record": raw[0],
+                            "benchmark_score": 89.5,
+                            "scores": {},
+                            "score_source": "score",
+                        },
                     }
                 },
                 raw_model_id="GPT-4o",

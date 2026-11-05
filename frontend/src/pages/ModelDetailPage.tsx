@@ -10,7 +10,6 @@ import {
   type SourceEntry,
 } from '../api/models'
 import { DOMAIN_LABELS } from '../api/tasks'
-import { HistoryLineChart, type HistoryPoint } from '../components/Chart'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
@@ -23,6 +22,18 @@ import {
   TableRow,
 } from '../components/ui/table'
 import { formatScore, formatTime } from '../lib/utils'
+
+/** 榜单固定维度（与后端 llm_scoring/prompt.py DIMENSIONS 一致） */
+const DIMENSIONS = ['intelligence', 'coding', 'agentic', 'long_context', 'image', 'video']
+
+const DIMENSION_LABELS: Record<string, string> = {
+  intelligence: '智力',
+  coding: '编程',
+  agentic: '智能体',
+  long_context: '长上下文',
+  image: '图像生成',
+  video: '视频生成',
+}
 
 /** 读取 snapshot.data.sources（容错非对象场景） */
 function sourcesOf(snapshot: Snapshot): Record<string, SourceEntry> {
@@ -73,7 +84,7 @@ function LlmScoreView({ llm }: { llm: LlmScore }) {
         <span className="font-medium">综合 {formatScore(llm.overall)}</span>
         <span className="text-muted-foreground">
           {Object.entries(llm.dims ?? {})
-            .map(([dim, v]) => `${dim}: ${v === null ? '-' : formatScore(v)}`)
+            .map(([dim, v]) => `${DIMENSION_LABELS[dim] ?? dim}: ${v === null ? '-' : formatScore(v)}`)
             .join(' / ')}
         </span>
       </div>
@@ -87,7 +98,7 @@ function LlmScoreView({ llm }: { llm: LlmScore }) {
 
 export default function ModelDetailPage() {
   const { modelId = '' } = useParams()
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [records, setRecords] = useState<FetchRecord[]>([])
   const [recordsTotal, setRecordsTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -96,7 +107,7 @@ export default function ModelDetailPage() {
     if (!modelId) return
     setLoading(true)
     listModelSnapshots(modelId)
-      .then(setSnapshots)
+      .then((items) => setSnapshot(items[0] ?? null))
       .catch((e: unknown) =>
         toast.error(e instanceof Error ? e.message : '快照加载失败'),
       )
@@ -111,19 +122,9 @@ export default function ModelDetailPage() {
       )
   }, [modelId])
 
-  const sorted = [...snapshots].sort((a, b) => a.updated_at.localeCompare(b.updated_at))
-  const domains = [...new Set(sorted.map((s) => s.domain))]
-  const chartData: HistoryPoint[] = sorted.map((s) => ({
-    time: formatTime(s.updated_at),
-    [s.domain]: Number(s.benchmark_score),
-  }))
-  const provider = snapshots[0]?.provider ?? '-'
-  // 采集详情按领域展示最新快照（每个 domain 取更新时间最新的一条）
-  const latestByDomain = new Map<string, Snapshot>()
-  for (const s of sorted) latestByDomain.set(s.domain, s)
-  const detailSnapshots = [...latestByDomain.values()].sort((a, b) =>
-    b.updated_at.localeCompare(a.updated_at),
-  )
+  const scores = snapshot?.scores ?? {}
+  const sources = snapshot ? sourcesOf(snapshot) : {}
+  const llm = snapshot ? llmScoreOf(snapshot) : null
 
   return (
     <div className="space-y-4">
@@ -131,54 +132,56 @@ export default function ModelDetailPage() {
         <CardHeader>
           <CardTitle className="break-all">{modelId}</CardTitle>
           <CardDescription>
-            厂商：{provider} · 共 {snapshots.length} 条历史快照
+            厂商：{snapshot?.provider ?? '-'}
+            {snapshot && ` · 更新于 ${formatTime(snapshot.updated_at)}`}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <Skeleton className="h-72 w-full" />
-          ) : snapshots.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">暂无历史快照</p>
-          ) : (
-            <HistoryLineChart data={chartData} domains={domains} />
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>历史快照</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
             <Skeleton className="h-40 w-full" />
+          ) : !snapshot ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无榜单数据</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>领域</TableHead>
-                  <TableHead>分数</TableHead>
-                  <TableHead>分数来源</TableHead>
-                  <TableHead>更新时间</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...snapshots]
-                  .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-                  .map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell>
-                        <Badge variant="secondary">{DOMAIN_LABELS[s.domain] ?? s.domain}</Badge>
-                      </TableCell>
-                      <TableCell>{formatScore(s.benchmark_score)}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {s.score_source ?? '-'}
-                      </TableCell>
-                      <TableCell>{formatTime(s.updated_at)}</TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-2xl font-semibold">{formatScore(snapshot.benchmark_score)}</span>
+                <span className="text-sm text-muted-foreground">主榜分</span>
+                {snapshot.score_source && (
+                  <Badge variant="outline">来源 {snapshot.score_source}</Badge>
+                )}
+              </div>
+              {llm && <LlmScoreView llm={llm} />}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {DIMENSIONS.map((dim) => (
+                      <TableHead key={dim}>{DIMENSION_LABELS[dim] ?? dim}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    {DIMENSIONS.map((dim) => {
+                      const value = scores[dim]
+                      return (
+                        <TableCell key={dim}>
+                          {value === null || value === undefined ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            formatScore(value)
+                          )}
+                        </TableCell>
+                      )
+                    })}
+                  </TableRow>
+                </TableBody>
+              </Table>
+              {!llm && (
+                <p className="text-xs text-muted-foreground">
+                  维度分为采集数据聚合结果；开启 LLM 打分后由大模型按采集数据统一评定，无法得出的维度显示 -。
+                </p>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -186,46 +189,32 @@ export default function ModelDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>采集详情</CardTitle>
-          <CardDescription>各平台采集到的原始数据（按领域展示最新快照）</CardDescription>
+          <CardDescription>各平台采集到的原始数据（同一模型多平台合并在一行）</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-2">
           {loading ? (
             <Skeleton className="h-40 w-full" />
-          ) : detailSnapshots.length === 0 ? (
+          ) : Object.keys(sources).length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">暂无采集数据</p>
           ) : (
-            detailSnapshots.map((s) => {
-              const sources = sourcesOf(s)
-              const llm = llmScoreOf(s)
-              return (
-                <div key={s.id} className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">{DOMAIN_LABELS[s.domain] ?? s.domain}</Badge>
-                    <span className="text-xs text-muted-foreground">
-                      更新于 {formatTime(s.updated_at)}
-                    </span>
-                  </div>
-                  {llm && <LlmScoreView llm={llm} />}
-                  {Object.keys(sources).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">该领域暂无来源数据</p>
-                  ) : (
-                    Object.entries(sources).map(([sourceKey, entry]) => (
-                      <div key={sourceKey} className="rounded border p-3 text-sm">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge>{sourceKey}</Badge>
-                          <span className="text-muted-foreground">
-                            原始模型名：{entry?.raw_model_id ?? '-'}
-                          </span>
-                        </div>
-                        <div className="mt-2">
-                          <JsonDetails label="查看采集到的原始数据" value={entry?.record} />
-                        </div>
-                      </div>
-                    ))
+            Object.entries(sources).map(([sourceKey, entry]) => (
+              <div key={sourceKey} className="rounded border p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge>{sourceKey}</Badge>
+                  {entry?.domain && (
+                    <Badge variant="secondary">
+                      {DOMAIN_LABELS[entry.domain] ?? entry.domain}
+                    </Badge>
                   )}
+                  <span className="text-muted-foreground">
+                    原始模型名：{entry?.raw_model_id ?? '-'}
+                  </span>
                 </div>
-              )
-            })
+                <div className="mt-2">
+                  <JsonDetails label="查看采集到的原始数据" value={entry?.record} />
+                </div>
+              </div>
+            ))
           )}
         </CardContent>
       </Card>

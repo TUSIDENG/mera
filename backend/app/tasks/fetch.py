@@ -107,13 +107,13 @@ def _trigger_llm_scoring(
         return
     from app.tasks.score import enqueue_score
 
-    keys = repo.fetch_record_keys_by_task(task_uuid)
-    for model_id, domain in keys:
-        enqueue_score(model_id, domain)
-    if keys:
+    model_ids = repo.fetch_record_model_ids_by_task(task_uuid)
+    for model_id in model_ids:
+        enqueue_score(model_id)
+    if model_ids:
         logger.info(
             "已触发 LLM 离线打分",
-            extra={"task_id": str(task_uuid), "score_tasks": len(keys)},
+            extra={"task_id": str(task_uuid), "score_tasks": len(model_ids)},
         )
 
 

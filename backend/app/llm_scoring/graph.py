@@ -39,7 +39,6 @@ class ScoreResult(BaseModel):
 
 class ScoringState(TypedDict, total=False):
     model_id: str
-    domain: str
     scorer: str
     provider: str
     sources: dict[str, Any]
@@ -54,13 +53,20 @@ def _clamp(value: float | None) -> float | None:
     return round(min(max(float(value), 0.0), 100.0), 2)
 
 
-def build_scoring_graph(repo: Any, llm: Any, *, max_input_chars: int) -> Any:
+def build_scoring_graph(
+    repo: Any,
+    llm: Any,
+    *,
+    max_input_chars: int,
+    structured_output_kwargs: dict[str, Any] | None = None,
+) -> Any:
     """装配四节点打分管线；llm 为 chat 模型（单测可注入假模型）。"""
+    output_kwargs = structured_output_kwargs or {}
 
     def load_node(state: ScoringState) -> dict[str, Any]:
-        snapshot = repo.get_snapshot(state["model_id"], state["domain"])
+        snapshot = repo.get_snapshot(state["model_id"])
         if snapshot is None:
-            return {"error": f"模型快照不存在: {state['model_id']}/{state['domain']}"}
+            return {"error": f"模型快照不存在: {state['model_id']}"}
         return {
             "provider": snapshot.provider,
             "sources": (snapshot.data or {}).get("sources") or {},
@@ -73,12 +79,11 @@ def build_scoring_graph(repo: Any, llm: Any, *, max_input_chars: int) -> Any:
         prompt = build_prompt(
             state["model_id"],
             state.get("provider") or "",
-            state["domain"],
             state.get("sources") or {},
             state.get("raw_scores") or {},
             max_chars=max_input_chars,
         )
-        result = llm.with_structured_output(ScoreResult).invoke(prompt)
+        result = llm.with_structured_output(ScoreResult, **output_kwargs).invoke(prompt)
         return {"result": result}
 
     def parse_node(state: ScoringState) -> dict[str, Any]:
@@ -105,12 +110,11 @@ def build_scoring_graph(repo: Any, llm: Any, *, max_input_chars: int) -> Any:
         if result.overall is None and all(v is None for v in result.dims.values()):
             logger.info(
                 "LLM 无法从采集数据得出任何分数，保持采集回落分",
-                extra={"model_id": state["model_id"], "domain": state["domain"]},
+                extra={"model_id": state["model_id"]},
             )
             return {"result": None}
         repo.apply_llm_score(
             state["model_id"],
-            state["domain"],
             overall=result.overall,
             dims=result.dims,
             rationale=result.rationale,
@@ -136,7 +140,6 @@ def score_snapshot(
     settings: Settings,
     *,
     model_id: str,
-    domain: str,
     llm: Any = None,
 ) -> bool:
     """对单个快照执行 LLM 打分；成功写库返回 True。
@@ -164,16 +167,22 @@ def score_snapshot(
         )
     model = settings.llm_scorer_model or spec.default_model
     scorer = f"{spec.provider}/{model}"
+    output_kwargs = (
+        {"method": spec.structured_output_method}
+        if spec.structured_output_method
+        else {}
+    )
     graph = build_scoring_graph(
-        repo, llm, max_input_chars=settings.llm_scorer_max_input_chars
+        repo,
+        llm,
+        max_input_chars=settings.llm_scorer_max_input_chars,
+        structured_output_kwargs=output_kwargs,
     )
-    final: ScoringState = graph.invoke(
-        {"model_id": model_id, "domain": domain, "scorer": scorer}
-    )
+    final: ScoringState = graph.invoke({"model_id": model_id, "scorer": scorer})
     if final.get("error"):
         logger.warning(
             "LLM 打分跳过",
-            extra={"model_id": model_id, "domain": domain, "error": final["error"]},
+            extra={"model_id": model_id, "error": final["error"]},
         )
         return False
     return final.get("result") is not None

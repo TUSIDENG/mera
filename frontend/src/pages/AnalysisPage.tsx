@@ -9,18 +9,10 @@ import {
   type RankedModel,
 } from '../api/analysis'
 import { ApiError } from '../api/client'
-import { DOMAIN_LABELS } from '../api/tasks'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../components/ui/select'
 import {
   Table,
   TableBody,
@@ -31,8 +23,6 @@ import {
 } from '../components/ui/table'
 import { formatCost } from '../lib/utils'
 
-const DOMAIN_KEYS = Object.keys(DOMAIN_LABELS)
-
 export default function AnalysisPage() {
   const [items, setItems] = useState<RankedModel[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -41,7 +31,6 @@ export default function AnalysisPage() {
   const form = useForm<AnalysisFormValues>({
     resolver: zodResolver(analysisFormSchema),
     defaultValues: {
-      domain: 'general',
       benchmark_weight: 0.6,
       tokens_per_month: 1_000_000,
       input_ratio: 0.7,
@@ -55,7 +44,7 @@ export default function AnalysisPage() {
     try {
       const res = await runAnalysis(toRunBody(values))
       setItems(res.items)
-      if (res.total === 0) setError('该领域暂无榜单数据，请先到「采集任务」页触发采集')
+      if (res.total === 0) setError('暂无榜单数据，请先到「采集任务」页触发采集')
     } catch (e) {
       setItems(null)
       setError(
@@ -84,28 +73,6 @@ export default function AnalysisPage() {
             onSubmit={(e) => void onSubmit(e)}
             className="flex flex-wrap items-end gap-4"
           >
-            <div className="w-36 space-y-1.5">
-              <Label htmlFor="domain">领域</Label>
-              <Controller
-                control={form.control}
-                name="domain"
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="domain">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DOMAIN_KEYS.map((key) => (
-                        <SelectItem key={key} value={key}>
-                          {DOMAIN_LABELS[key]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-
             <div className="w-64 space-y-1.5">
               <Label htmlFor="benchmark_weight">
                 榜单权重 {(benchmarkWeight * 100).toFixed(0)}% / 价格权重{' '}

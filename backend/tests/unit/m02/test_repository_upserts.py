@@ -81,7 +81,12 @@ def test_upsert_snapshots_is_idempotent_and_updates_values(db_session: Session) 
             provider="openai",
             domain="coding",
             benchmark_score=Decimal("88.00"),
-            data={"version": "a"},
+            source_key="demo",
+            data={
+                "sources": {
+                    "demo": {"benchmark_score": 88.0, "scores": {}, "record": {}}
+                }
+            },
         )
     ]
 
@@ -93,7 +98,12 @@ def test_upsert_snapshots_is_idempotent_and_updates_values(db_session: Session) 
             provider="openai",
             domain="coding",
             benchmark_score=Decimal("92.50"),
-            data={"version": "b"},
+            source_key="demo",
+            data={
+                "sources": {
+                    "demo": {"benchmark_score": 92.5, "scores": {}, "record": {}}
+                }
+            },
         )
     ]) == 1
     db_session.commit()
@@ -103,7 +113,7 @@ def test_upsert_snapshots_is_idempotent_and_updates_values(db_session: Session) 
     assert count == 1
     assert snapshot is not None
     assert snapshot.benchmark_score == Decimal("92.50")
-    assert snapshot.data == {"version": "b"}
+    assert snapshot.data["sources"]["demo"]["benchmark_score"] == 92.5
 
 
 def test_upsert_snapshots_supports_partial_conflict_batch(db_session: Session) -> None:
@@ -114,6 +124,8 @@ def test_upsert_snapshots_supports_partial_conflict_batch(db_session: Session) -
             provider="a",
             domain="general_office",
             benchmark_score=Decimal("70.00"),
+            source_key="demo",
+            data={"sources": {"demo": {"benchmark_score": 70.0, "record": {}}}},
         )
     ])
     db_session.commit()
@@ -124,12 +136,16 @@ def test_upsert_snapshots_supports_partial_conflict_batch(db_session: Session) -
             provider="a",
             domain="general_office",
             benchmark_score=Decimal("75.00"),
+            source_key="demo",
+            data={"sources": {"demo": {"benchmark_score": 75.0, "record": {}}}},
         ),
         SnapshotRecord(
             model_id="b/model",
             provider="b",
             domain="general_office",
             benchmark_score=Decimal("80.00"),
+            source_key="demo",
+            data={"sources": {"demo": {"benchmark_score": 80.0, "record": {}}}},
         ),
     ])
     db_session.commit()
@@ -237,24 +253,31 @@ def test_latest_snapshots_orders_by_score_then_model_id(db_session: Session) -> 
             provider="b",
             domain="coding",
             benchmark_score=Decimal("90.00"),
+            source_key="demo",
+            data={"sources": {"demo": {"benchmark_score": 90.0, "record": {}}}},
         ),
         SnapshotRecord(
             model_id="a/model",
             provider="a",
             domain="coding",
             benchmark_score=Decimal("95.00"),
+            source_key="demo",
+            data={"sources": {"demo": {"benchmark_score": 95.0, "record": {}}}},
         ),
         SnapshotRecord(
             model_id="c/model",
             provider="c",
             domain="other",
             benchmark_score=Decimal("99.00"),
+            source_key="other_source",
+            data={"sources": {"other_source": {"benchmark_score": 99.0, "record": {}}}},
         ),
     ])
     db_session.commit()
 
-    snapshots = repo.latest_snapshots("coding")
-    assert [snapshot.model_id for snapshot in snapshots] == ["a/model", "b/model"]
+    # 一个模型一行，不再按域过滤：按主榜分降序、同分按 model_id
+    snapshots = repo.latest_snapshots()
+    assert [snapshot.model_id for snapshot in snapshots] == ["c/model", "a/model", "b/model"]
 
 
 def test_empty_upsert_returns_zero(db_session: Session) -> None:
@@ -305,7 +328,6 @@ def test_invalid_record_rolls_back(db_session: Session, method: str) -> None:
                 ModelSnapshot(
                     model_id="bad",
                     provider="bad",
-                    domain="coding",
                     benchmark_score=Decimal("-1.00"),
                 )
             )
@@ -344,9 +366,7 @@ class TestSnapshotMergeUpsert:
 
     def _snapshot(self, db_session: Session, model_id: str = "m") -> ModelSnapshot:
         return db_session.scalar(
-            select(ModelSnapshot).where(
-                ModelSnapshot.model_id == model_id, ModelSnapshot.domain == "general"
-            )
+            select(ModelSnapshot).where(ModelSnapshot.model_id == model_id)
         )
 
     def test_null_dims_do_not_overwrite(self, db_session: Session) -> None:
@@ -355,8 +375,14 @@ class TestSnapshotMergeUpsert:
             SnapshotRecord(
                 model_id="m", provider="p", domain="general",
                 benchmark_score=Decimal("80.0"), score_source="intelligence",
+                source_key="aa",
                 scores={"intelligence": 80.0, "coding": 70.0},
-                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+                data={"sources": {"aa": {
+                    "raw_model_id": "m",
+                    "benchmark_score": 80.0,
+                    "scores": {"intelligence": 80.0, "coding": 70.0},
+                    "record": {},
+                }}},
             )
         ])
         db_session.commit()
@@ -365,8 +391,14 @@ class TestSnapshotMergeUpsert:
             SnapshotRecord(
                 model_id="m", provider="p", domain="general",
                 benchmark_score=Decimal("81.5"), score_source="intelligence",
+                source_key="aa",
                 scores={"intelligence": 81.5, "coding": None},
-                data={"sources": {"aa": {"raw_model_id": "m:v2", "record": {}}}},
+                data={"sources": {"aa": {
+                    "raw_model_id": "m:v2",
+                    "benchmark_score": 81.5,
+                    "scores": {"intelligence": 81.5, "coding": None},
+                    "record": {},
+                }}},
             )
         ])
         db_session.commit()
@@ -382,8 +414,14 @@ class TestSnapshotMergeUpsert:
             SnapshotRecord(
                 model_id="m", provider="anthropic", domain="general",
                 benchmark_score=Decimal("80.0"), score_source="intelligence",
+                source_key="artificial_analysis",
                 scores={"intelligence": 80.0},
-                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+                data={"sources": {"artificial_analysis": {
+                    "raw_model_id": "m",
+                    "benchmark_score": 80.0,
+                    "scores": {"intelligence": 80.0},
+                    "record": {},
+                }}},
             )
         ])
         db_session.commit()
@@ -391,18 +429,57 @@ class TestSnapshotMergeUpsert:
             SnapshotRecord(
                 model_id="m", provider="openai", domain="general",
                 benchmark_score=None, score_source=None,
+                source_key="openrouter",
                 scores={"coding": 66.0},
-                data={"sources": {"openrouter": {"raw_model_id": "anthropic/m", "record": {}}}},
+                data={"sources": {"openrouter": {
+                    "raw_model_id": "anthropic/m",
+                    "benchmark_score": None,
+                    "scores": {"coding": 66.0},
+                    "record": {},
+                }}},
             )
         ])
         db_session.commit()
         snap = self._snapshot(db_session)
         # 不同 source_key 共存
-        assert set(snap.data["sources"]) == {"aa", "openrouter"}
+        assert set(snap.data["sources"]) == {"artificial_analysis", "openrouter"}
         # 新维度分并入；主榜分新值为空保留旧值；provider 首采为准
         assert snap.scores == {"intelligence": 80.0, "coding": 66.0}
         assert snap.benchmark_score == Decimal("80.0")
         assert snap.provider == "anthropic"
+
+    def test_same_batch_multi_source_merge(self, db_session: Session) -> None:
+        """同一批次内同模型的多来源记录逐条合并，不能去重丢掉较早来源。"""
+        repo = Repository(db_session)
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="p", domain="chat",
+                benchmark_score=Decimal("70.0"), score_source="intelligence",
+                source_key="lmarena",
+                scores={"intelligence": 70.0},
+                data={"sources": {"lmarena": {
+                    "domain": "chat", "benchmark_score": 70.0,
+                    "scores": {"intelligence": 70.0}, "record": {},
+                }}},
+            ),
+            SnapshotRecord(
+                model_id="m", provider="p", domain="general",
+                benchmark_score=Decimal("65.0"), score_source="intelligence",
+                source_key="artificial_analysis",
+                scores={"intelligence": 80.0, "coding": 75.0},
+                data={"sources": {"artificial_analysis": {
+                    "domain": "general", "benchmark_score": 65.0,
+                    "scores": {"intelligence": 80.0, "coding": 75.0}, "record": {},
+                }}},
+            ),
+        ])
+        db_session.commit()
+        snap = self._snapshot(db_session)
+        assert set(snap.data["sources"]) == {"lmarena", "artificial_analysis"}
+        # 主榜分与维度分按源优先级取 AA
+        assert snap.benchmark_score == Decimal("65.0")
+        assert snap.score_source == "artificial_analysis"
+        assert snap.scores == {"intelligence": 80.0, "coding": 75.0}
 
     def test_llm_scored_row_protected_from_overwrite(self, db_session: Session) -> None:
         repo = Repository(db_session)
@@ -410,15 +487,21 @@ class TestSnapshotMergeUpsert:
             SnapshotRecord(
                 model_id="m", provider="p", domain="general",
                 benchmark_score=Decimal("80.0"), score_source="intelligence",
+                source_key="artificial_analysis",
                 scores={"intelligence": 80.0},
-                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+                data={"sources": {"artificial_analysis": {
+                    "raw_model_id": "m",
+                    "benchmark_score": 80.0,
+                    "scores": {"intelligence": 80.0},
+                    "record": {},
+                }}},
             )
         ])
         db_session.commit()
         repo.apply_llm_score(
-            "m", "general", overall=88.5,
+            "m", overall=88.5,
             dims={"intelligence": 88.5, "coding": 90.0, "agentic": None,
-                  "image": None, "video": None},
+                  "long_context": None, "image": None, "video": None},
             rationale="基于 AA 采集数据", scorer="deepseek/deepseek-chat",
         )
         db_session.commit()
@@ -439,7 +522,7 @@ class TestSnapshotMergeUpsert:
         assert snap.score_source == "llm:deepseek/deepseek-chat"
         assert snap.benchmark_score == Decimal("88.5")
         assert snap.scores["coding"] == 90.0
-        assert set(snap.data["sources"]) == {"aa", "openrouter"}
+        assert set(snap.data["sources"]) == {"artificial_analysis", "openrouter"}
         assert snap.data["llm_score"]["overall"] == 88.5
 
 
@@ -483,8 +566,8 @@ class TestFetchRecords:
         assert items[0].record["benchmark_score"] == 89.5
         items, total = repo.list_fetch_records_by_task(task.id, limit=10, offset=0)
         assert total == 2
-        assert set(repo.fetch_record_keys_by_task(task.id)) == {
-            ("gpt-4o", "general"),
-            ("claude-opus-5", "general"),
+        assert set(repo.fetch_record_model_ids_by_task(task.id)) == {
+            "gpt-4o",
+            "claude-opus-5",
         }
         assert isinstance(task.id, uuid.UUID)

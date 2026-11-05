@@ -45,11 +45,10 @@ def test_run_analysis_ranked(user_client):
     repo.snapshots = [snapshot for snapshot, _ in pairs]
     repo.prices = [price for _, price in pairs]
 
-    resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
+    resp = client.post("/api/v1/analysis/run", json={})
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["domain"] == "coding"
     assert body["total"] == 3
     assert [item["model_id"] for item in body["items"]] == [
         "claude-3",
@@ -69,7 +68,7 @@ def test_run_analysis_ranked(user_client):
     assert body["items"][2]["monthly_cost"] == pytest.approx(1.3)
 
     assert ("latest_prices", {}) in repo.calls
-    assert ("latest_snapshots", {"domain": "coding"}) in repo.calls
+    assert ("latest_snapshots", {}) in repo.calls
 
 
 def test_run_analysis_skips_scoreless_models(user_client):
@@ -80,7 +79,7 @@ def test_run_analysis_skips_scoreless_models(user_client):
         make_snapshot(model_id="scoreless", benchmark_score=None),
     ]
     repo.prices = [make_price(model_id="scored")]
-    resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
+    resp = client.post("/api/v1/analysis/run", json={})
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
@@ -89,7 +88,7 @@ def test_run_analysis_skips_scoreless_models(user_client):
 
 def test_run_analysis_unauthorized(anon_client):
     client, _, _ = anon_client
-    resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
+    resp = client.post("/api/v1/analysis/run", json={})
     assert resp.status_code == 401
     assert resp.json()["code"] == "auth_error"
 
@@ -107,6 +106,6 @@ def test_run_analysis_invalid_weights_422(user_client):
 def test_run_analysis_empty_snapshots(user_client):
     client, repo, _ = user_client
     repo.snapshots = []
-    resp = client.post("/api/v1/analysis/run", json={"domain": "coding"})
+    resp = client.post("/api/v1/analysis/run", json={})
     assert resp.status_code == 200
-    assert resp.json() == {"domain": "coding", "items": [], "total": 0}
+    assert resp.json() == {"items": [], "total": 0}

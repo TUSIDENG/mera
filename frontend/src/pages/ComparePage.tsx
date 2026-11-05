@@ -1,19 +1,30 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { listModels } from '../api/models'
-import { DOMAIN_LABELS } from '../api/tasks'
 import { CompareRadarChart, type RadarRow } from '../components/Chart'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import { Skeleton } from '../components/ui/skeleton'
 
-const DOMAIN_KEYS = ['general', 'chat', 'coding']
+/** 对比维度（与榜单列一致） */
+const DIMENSIONS = ['intelligence', 'coding', 'agentic', 'long_context', 'image', 'video']
+
+const DIMENSION_LABELS: Record<string, string> = {
+  intelligence: '智力',
+  coding: '编程',
+  agentic: '智能体',
+  long_context: '长上下文',
+  image: '图像生成',
+  video: '视频生成',
+}
+
 const MAX_SELECTED = 6
 
 interface CompareEntry {
   model_id: string
   provider: string
-  scores: Record<string, number>
+  scores: Record<string, number | null>
+  benchmark: number | null
 }
 
 export default function ComparePage() {
@@ -23,23 +34,17 @@ export default function ComparePage() {
   const [keyword, setKeyword] = useState('')
 
   useEffect(() => {
-    // 拉取三个 domain 的榜单，按 model_id 合并出「模型 × domain 分数」矩阵
-    Promise.all(DOMAIN_KEYS.map((d) => listModels(d)))
-      .then((results) => {
-        const map = new Map<string, CompareEntry>()
-        results.forEach((res, i) => {
-          for (const s of res.items) {
-            const entry =
-              map.get(s.model_id) ?? { model_id: s.model_id, provider: s.provider, scores: {} }
-            entry.scores[DOMAIN_KEYS[i]] = Number(s.benchmark_score)
-            map.set(s.model_id, entry)
-          }
-        })
+    listModels(1, 100)
+      .then((res) => {
         setEntries(
-          [...map.values()].sort(
-            (a, b) =>
-              Math.max(...Object.values(b.scores), 0) - Math.max(...Object.values(a.scores), 0),
-          ),
+          res.items
+            .map((s) => ({
+              model_id: s.model_id,
+              provider: s.provider,
+              scores: s.scores ?? {},
+              benchmark: s.benchmark_score === null ? null : Number(s.benchmark_score),
+            }))
+            .sort((a, b) => (b.benchmark ?? -1) - (a.benchmark ?? -1)),
         )
       })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : '数据加载失败'))
@@ -65,10 +70,13 @@ export default function ComparePage() {
     })
   }
 
-  const radarData: RadarRow[] = DOMAIN_KEYS.map((domain) => {
-    const row: RadarRow = { domain: DOMAIN_LABELS[domain] ?? domain }
+  const radarData: RadarRow[] = DIMENSIONS.map((dim) => {
+    const row: RadarRow = { dimension: DIMENSION_LABELS[dim] ?? dim }
     for (const modelId of selected) {
-      row[modelId] = entries.find((e) => e.model_id === modelId)?.scores[domain] ?? 0
+      const entry = entries.find((e) => e.model_id === modelId)
+      const value = entry?.scores?.[dim]
+      // 缺失维度按 0 展示（雷达图不支持 null），hover 明细仍可看原始分
+      row[modelId] = value ?? 0
     }
     return row
   })
@@ -105,7 +113,7 @@ export default function ComparePage() {
                     />
                     <span className="flex-1 break-all">{e.model_id}</span>
                     <span className="text-xs text-muted-foreground">
-                      {Math.max(...Object.values(e.scores), 0).toFixed(2)}
+                      {e.benchmark === null ? '-' : e.benchmark.toFixed(2)}
                     </span>
                   </label>
                 </li>
@@ -124,7 +132,7 @@ export default function ComparePage() {
           <CardDescription>
             {selected.length > 0
               ? `已选 ${selected.length} 个模型：${selected.join('、')}`
-              : '按 通用 / 对话 / 代码 三个 domain 维度对比'}
+              : '按 智力 / 编程 / 智能体 / 长上下文 / 图像 / 视频 维度对比'}
           </CardDescription>
         </CardHeader>
         <CardContent>

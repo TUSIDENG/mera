@@ -16,7 +16,6 @@ class SnapshotOut(BaseModel):
     id: uuid.UUID
     model_id: str
     provider: str
-    domain: str
     benchmark_score: Decimal | None
     scores: dict[str, Any]
     score_source: str | None
@@ -34,6 +33,5 @@ class FetchRecordOut(BaseModel):
     source_key: str
     model_id: str
     raw_model_id: str | None
-    domain: str
     record: dict[str, Any]
     created_at: datetime

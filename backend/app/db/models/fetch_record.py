@@ -34,8 +34,7 @@ class FetchRecord(Base):
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     # 平台上的原始模型名（含 vendor 前缀/变体后缀）
     raw_model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    domain: Mapped[str] = mapped_column(String(50), nullable=False)
-    # 该条标准化后的完整记录（含 scores/data 等）
+    # 该条标准化后的完整记录（含 domain/scores/data 等）
     record: Mapped[dict[str, Any]] = mapped_column(JSONBType, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

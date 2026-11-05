@@ -21,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table'
-import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import {
   useLeaderboardTable,
   type RankedSnapshot,
@@ -29,11 +28,8 @@ import {
 } from '../hooks/useLeaderboardTable'
 import { formatScore, formatTime } from '../lib/utils'
 
-const DOMAINS = [
-  { key: 'general', label: '通用' },
-  { key: 'chat', label: '对话' },
-  { key: 'coding', label: '代码' },
-]
+/** 榜单固定维度列（一个模型一行，各维度均由 LLM 基于采集数据评定，缺失显示 -） */
+const DIMENSIONS = ['intelligence', 'coding', 'agentic', 'long_context', 'image', 'video']
 
 /** 维度中文名与说明（悬浮展示） */
 const DIMENSION_META: Record<string, { label: string; desc: string }> = {
@@ -41,6 +37,7 @@ const DIMENSION_META: Record<string, { label: string; desc: string }> = {
   intelligence: { label: '智力', desc: '综合推理与知识能力（LLM 基于采集数据评定）' },
   coding: { label: '编程', desc: '代码生成与软件工程能力（LLM 基于采集数据评定）' },
   agentic: { label: '智能体', desc: '工具调用与自主任务能力（LLM 基于采集数据评定）' },
+  long_context: { label: '长上下文', desc: '长上下文与长文档处理能力（LLM 基于采集数据评定，无数据为 -）' },
   image: { label: '图像生成', desc: '图像生成能力（LLM 基于采集数据评定，无数据为 -）' },
   video: { label: '视频生成', desc: '视频生成能力（LLM 基于采集数据评定，无数据为 -）' },
 }
@@ -55,14 +52,13 @@ function dimDesc(key: string): string {
 
 export default function LeaderboardPage() {
   const navigate = useNavigate()
-  const [domain, setDomain] = useState('general')
   const [items, setItems] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     setLoading(true)
-    listModels(domain)
+    listModels()
       .then((res) => {
         setItems(res.items)
         // 重置平台筛选
@@ -72,22 +68,10 @@ export default function LeaderboardPage() {
         toast.error(e instanceof Error ? e.message : '榜单加载失败'),
       )
       .finally(() => setLoading(false))
-  }, [domain])
+  }, [])
 
-  // 提取所有出现过的维度（保持固定顺序：score 优先，其余按出现顺序）
-  const dimensions = useMemo(() => {
-    const seen = new Set<string>()
-    const ordered: string[] = []
-    for (const item of items) {
-      for (const key of Object.keys(item.scores ?? {})) {
-        if (!seen.has(key)) {
-          seen.add(key)
-          ordered.push(key)
-        }
-      }
-    }
-    return ordered
-  }, [items])
+  // 固定维度列：即使当前数据缺失也稳定展示，缺失为 -
+  const dimensions = DIMENSIONS
 
   // 平台列表（按字母序）
   const providers = useMemo(() => {
@@ -169,16 +153,6 @@ export default function LeaderboardPage() {
         <CardTitle>模型榜单</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Tabs value={domain} onValueChange={setDomain}>
-          <TabsList>
-            {DOMAINS.map((d) => (
-              <TabsTrigger key={d.key} value={d.key}>
-                {d.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-
         {/* 平台多选筛选 */}
         {!loading && providers.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">

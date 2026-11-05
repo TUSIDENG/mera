@@ -27,9 +27,9 @@ from app.db.uuid7 import uuid7
 class ModelSnapshot(Base):
     __tablename__ = "model_snapshots"
     __table_args__ = (
-        UniqueConstraint("model_id", "domain", name="uq_model_snapshot"),
-        Index("idx_model_snapshot_domain", "domain", "benchmark_score"),
-        Index("idx_model_snapshot_provider", "provider", "domain"),
+        UniqueConstraint("model_id", name="uq_model_snapshot"),
+        Index("idx_model_snapshot_score", "benchmark_score"),
+        Index("idx_model_snapshot_provider", "provider"),
         Index("idx_model_snapshot_data", "data", postgresql_using="gin"),
         CheckConstraint("benchmark_score >= 0", name="ck_model_snapshot_score_non_negative"),
     )
@@ -37,7 +37,6 @@ class ModelSnapshot(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
-    domain: Mapped[str] = mapped_column(String(50), nullable=False)
     # 主榜分：多维度按回落顺序取出的代表分；全部维度缺失时为 None（区别于真 0 分）
     benchmark_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     # 各维度原始分（如 {"intelligence": 51, "coding": 70.1, "agentic": null}）
