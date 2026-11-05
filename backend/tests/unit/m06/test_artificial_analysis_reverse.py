@@ -1,19 +1,47 @@
-"""M06 artificial_analysis 逆向接口方案：签名构造/解析/异常/密钥缺失跳过。"""
+"""M06 artificial_analysis 结构化解析方案：RSC 提取/字段映射/异常分类。"""
 
 from __future__ import annotations
 
-from urllib.parse import parse_qs, urlparse
+import json
 
 import pytest
 import responses
 from helpers import make_fetcher, site_config
 
-from app.core.exceptions import CaptchaRequired, FetchFailed, SecretError
-from app.fetchers.signing import sign_hmac_md5
-from app.fetchers.sites.artificial_analysis.reverse_api import build_request, parse_response
+from app.core.exceptions import FetchFailed
+from app.fetchers.sites.artificial_analysis.reverse_api import (
+    build_request,
+    extract_named_array,
+    extract_rsc_payload,
+    map_records,
+)
 
-ENDPOINT = "https://artificialanalysis.ai/api/v1/leaderboard/models"
-TS = 1700000000
+PAGE_URL = "https://artificialanalysis.ai/leaderboards/models"
+
+_MODELS = [
+    {
+        "slug": "gpt-6-1-sol-xhigh",
+        "name": "GPT-6.1 Sol (Xhigh)",
+        "modelCreatorName": "OpenAI",
+        "intelligenceIndex": 52.458219253291,
+    },
+    {
+        "slug": "jt-35b-flash",
+        "name": "JT-35B-Flash",
+        "modelCreatorName": "China Mobile",
+        "intelligenceIndex": None,
+    },
+    {"slug": "broken", "modelCreatorName": "NoName"},  # 缺 name，应被丢弃
+]
+
+
+def _page_html(models: list[dict] | None = None) -> str:
+    """构造含 RSC 内嵌数据的假页面；字符串内含引号/括号，覆盖配平扫描。"""
+    if models is None:
+        models = _MODELS
+    payload = '22:["$","div",null,{"initialModels":' + json.dumps(models) + "}]"
+    frame = json.dumps([1, payload])
+    return f'<html><script>self.__next_f.push({frame})</script></html>'
 
 
 @pytest.fixture
@@ -22,130 +50,86 @@ def cfg() -> dict:
 
 
 class TestBuildRequest:
-    def test_signed_params(self, cfg):
-        spec = build_request(cfg, secret="s3cr3t", timestamp=TS, page=2)
+    def test_get_public_page(self, cfg):
+        spec = build_request(cfg)
         assert spec.method == "GET"
-        assert spec.url == ENDPOINT
-        expected = sign_hmac_md5({"page": 2, "size": 50}, "s3cr3t", TS)
-        assert spec.params["sign"] == expected
-        assert spec.params["timestamp"] == TS
-        assert spec.params["page"] == 2
+        assert spec.url == PAGE_URL
+        assert spec.params == {}
+        assert "User-Agent" in spec.headers
 
-    def test_secret_not_in_request(self, cfg):
-        spec = build_request(cfg, secret="s3cr3t-value", timestamp=TS)
-        assert "s3cr3t-value" not in str(spec.params.values())
-        assert "s3cr3t-value" not in str(spec.headers.values())
-
-    def test_referer_from_playwright_url(self, cfg):
-        spec = build_request(cfg, secret="s", timestamp=TS)
-        assert spec.headers["Referer"] == cfg["playwright"]["url"]
+    def test_no_secret_or_signature(self, cfg):
+        spec = build_request(cfg)
+        assert not spec.params
+        assert "sign" not in str(spec.headers).lower()
 
 
-class TestParseResponse:
-    def test_extracts_records_and_flags(self):
-        payload = {"code": 0, "data": {"list": [{"model": "GPT-4o"}], "has_more": True}}
-        records, has_more, truncated = parse_response(payload)
-        assert records == [{"model": "GPT-4o"}]
-        assert has_more is True
-        assert truncated is False
+class TestExtractRscPayload:
+    def test_joins_string_frames(self):
+        html = _page_html()
+        blob = extract_rsc_payload(html)
+        assert '"initialModels"' in blob
+        assert "GPT-6.1 Sol" in blob
 
-    def test_server_truncated(self):
-        payload = {"code": 0, "data": {"list": [], "truncated": True}}
-        _, _, truncated = parse_response(payload)
-        assert truncated is True
+    def test_skips_dirty_frames(self):
+        html = "<script>self.__next_f.push({bad})</script>" + _page_html()
+        assert '"initialModels"' in extract_rsc_payload(html)
 
-    @pytest.mark.parametrize("payload", [None, [], {}, {"data": "x"}, {"data": {"list": "x"}}])
-    def test_dirty_payload(self, payload):
-        assert parse_response(payload) == ([], False, False)
+    def test_no_frames(self):
+        assert extract_rsc_payload("<html></html>") == ""
+
+
+class TestExtractNamedArray:
+    def test_extracts_array_with_nested_brackets_in_strings(self):
+        blob = 'x:{"a":"[not an array ] \\"quoted\\""},"initialModels":[{"name":"m1"}]'
+        arr = extract_named_array(blob, "initialModels")
+        assert arr == [{"name": "m1"}]
+
+    def test_missing_key(self):
+        assert extract_named_array('{"other":[]}', "initialModels") == []
+
+    def test_dirty_json(self):
+        assert extract_named_array('"initialModels":[{bad', "initialModels") == []
+
+
+class TestMapRecords:
+    def test_maps_config_fields(self, cfg):
+        fields = cfg["reverse_api"]["fields"]
+        records = map_records(_MODELS, fields)
+        assert records == [
+            {"model": "GPT-6.1 Sol (Xhigh)", "provider": "OpenAI", "score": 52.458219253291},
+            {"model": "JT-35B-Flash", "provider": "China Mobile", "score": None},
+        ]
+
+    def test_skips_non_dict(self, cfg):
+        assert map_records(["x", None], cfg["reverse_api"]["fields"]) == []
 
 
 class TestAvailability:
-    def test_missing_secret_unavailable_with_reason(self, monkeypatch):
+    def test_available_without_any_secret(self, monkeypatch):
         monkeypatch.delenv("AA_SECRET", raising=False)
         fetcher = make_fetcher("artificial_analysis", "reverse_api")
-        assert fetcher.is_available() is False
-        assert "env:AA_SECRET" in fetcher.unavailable_reason
-
-    def test_fetch_without_secret_raises_before_request(self, monkeypatch):
-        monkeypatch.delenv("AA_SECRET", raising=False)
-        fetcher = make_fetcher("artificial_analysis", "reverse_api")
-        with pytest.raises(SecretError):
-            fetcher.fetch()
-
-    def test_reason_does_not_contain_secret_value(self, monkeypatch):
-        monkeypatch.delenv("AA_SECRET", raising=False)
-        fetcher = make_fetcher("artificial_analysis", "reverse_api")
-        assert "AA_SECRET" in fetcher.unavailable_reason  # 变量名可出现，值不可出现
+        assert fetcher.is_available() is True
 
 
 class TestFetch:
     @responses.activate
-    def test_fetch_single_page(self, monkeypatch, cfg):
-        monkeypatch.setenv("AA_SECRET", "s3cr3t")
-        payload = {"code": 0, "data": {"list": [{"model": "GPT-4o"}], "has_more": False}}
-        responses.get(ENDPOINT, json=payload, status=200)
-        sleeps: list[float] = []
-        fetcher = make_fetcher(
-            "artificial_analysis", "reverse_api", _sleep=sleeps.append, _now=lambda: float(TS)
-        )
+    def test_fetch_parses_embedded_models(self, cfg):
+        responses.get(PAGE_URL, body=_page_html(), status=200)
+        fetcher = make_fetcher("artificial_analysis", "reverse_api")
         records = fetcher.fetch()
-        assert records == [{"model": "GPT-4o"}]
+        assert [r["model"] for r in records] == ["GPT-6.1 Sol (Xhigh)", "JT-35B-Flash"]
+        assert records[0]["score"] == pytest.approx(52.458, abs=1e-3)
         assert fetcher.truncated is False
-        assert sleeps == [6.0]  # rate_limit_per_min=10 -> 限频 6s
-        query = parse_qs(urlparse(responses.calls[0].request.url).query)
-        assert query["sign"] == [sign_hmac_md5({"page": 1, "size": 50}, "s3cr3t", TS)]
-        assert query["timestamp"] == [str(TS)]
 
     @responses.activate
-    def test_fetch_paginates_until_no_more(self, monkeypatch):
-        monkeypatch.setenv("AA_SECRET", "s3cr3t")
-        responses.get(
-            ENDPOINT,
-            json={"code": 0, "data": {"list": [{"model": "m1"}], "has_more": True}},
-        )
-        responses.get(
-            ENDPOINT,
-            json={"code": 0, "data": {"list": [{"model": "m2"}], "has_more": False}},
-        )
-        fetcher = make_fetcher(
-            "artificial_analysis", "reverse_api", _sleep=lambda s: None, _now=lambda: float(TS)
-        )
-        records = fetcher.fetch()
-        assert [r["model"] for r in records] == ["m1", "m2"]
-        assert fetcher.truncated is False
-        assert len(responses.calls) == 2
-
-    @responses.activate
-    def test_max_pages_marks_truncated(self, monkeypatch):
-        monkeypatch.setenv("AA_SECRET", "s3cr3t")
-        responses.get(
-            ENDPOINT,
-            json={"code": 0, "data": {"list": [{"model": "m"}], "has_more": True}},
-        )
-        fetcher = make_fetcher(
-            "artificial_analysis", "reverse_api", _sleep=lambda s: None, _now=lambda: float(TS)
-        )
-        fetcher.cfg["reverse_api"]["max_pages"] = 2
-        records = fetcher.fetch()
-        assert len(records) == 2  # 已到翻页上限
-        assert fetcher.truncated is True
-
-    @responses.activate
-    def test_http_500_raises_fetch_failed(self, monkeypatch):
-        monkeypatch.setenv("AA_SECRET", "s3cr3t")
-        responses.get(ENDPOINT, status=500)
-        fetcher = make_fetcher(
-            "artificial_analysis", "reverse_api", _sleep=lambda s: None, _now=lambda: float(TS)
-        )
+    def test_http_500_raises_fetch_failed(self):
+        responses.get(PAGE_URL, status=500)
+        fetcher = make_fetcher("artificial_analysis", "reverse_api")
         with pytest.raises(FetchFailed, match="500"):
             fetcher.fetch()
 
     @responses.activate
-    def test_captcha_code_raises_captcha_required(self, monkeypatch):
-        monkeypatch.setenv("AA_SECRET", "s3cr3t")
-        responses.get(ENDPOINT, json={"code": "CAPTCHA_REQUIRED"}, status=200)
-        fetcher = make_fetcher(
-            "artificial_analysis", "reverse_api", _sleep=lambda s: None, _now=lambda: float(TS)
-        )
-        with pytest.raises(CaptchaRequired):
-            fetcher.fetch()
+    def test_missing_array_returns_empty(self):
+        responses.get(PAGE_URL, body="<html><script>self.__next_f.push([1,\"x\"])</script></html>")
+        fetcher = make_fetcher("artificial_analysis", "reverse_api")
+        assert fetcher.fetch() == []
