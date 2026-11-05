@@ -38,9 +38,11 @@ const DOMAINS = [
 /** 维度中文名与说明（悬浮展示） */
 const DIMENSION_META: Record<string, { label: string; desc: string }> = {
   score: { label: '综合分', desc: '站点原始总分（不同站点口径不同，不可直接跨站比较）' },
-  intelligence: { label: '智力', desc: 'Artificial Analysis Intelligence Index：综合推理与知识能力' },
-  coding: { label: '编程', desc: 'Artificial Analysis Coding Index：代码生成与调试能力' },
-  agentic: { label: '智能体', desc: 'Artificial Analysis Agentic Index：工具调用与自主任务能力' },
+  intelligence: { label: '智力', desc: '综合推理与知识能力（LLM 基于采集数据评定）' },
+  coding: { label: '编程', desc: '代码生成与软件工程能力（LLM 基于采集数据评定）' },
+  agentic: { label: '智能体', desc: '工具调用与自主任务能力（LLM 基于采集数据评定）' },
+  image: { label: '图像生成', desc: '图像生成能力（LLM 基于采集数据评定，无数据为 -）' },
+  video: { label: '视频生成', desc: '视频生成能力（LLM 基于采集数据评定，无数据为 -）' },
 }
 
 function dimLabel(key: string): string {

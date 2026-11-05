@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     # --- 内网接口（M04：RPA 回调等 /internal 路由共享密钥） ---
     internal_api_token: str | None = None
 
+    # --- LLM 离线打分（app/scoring；无 key 视为关闭） ---
+    llm_scorer_enabled: bool = False
+    # 打分模型提供方：deepseek / gemini / chatgpt / openrouter
+    llm_scorer_provider: str = "deepseek"
+    llm_scorer_model: str | None = None  # 缺省用注册表默认模型
+    deepseek_api_key: str | None = None
+    gemini_api_key: str | None = None
+    chatgpt_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    llm_scorer_timeout_seconds: int = 60
+    llm_scorer_max_input_chars: int = 8000
+
     # --- 通知（M10 使用，预留；SMTP 未配置则仅走 WebSocket） ---
     smtp_host: str | None = None
     smtp_port: int = 465

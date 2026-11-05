@@ -1,10 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   createFetchTask,
   fetchTaskFormSchema,
+  listFetchTaskRecords,
   listFetchTasks,
   TASK_TYPES,
   TASK_TYPE_LABELS,
@@ -12,6 +14,7 @@ import {
   type FetchTaskFormValues,
   type TaskType,
 } from '../api/tasks'
+import type { FetchRecord } from '../api/models'
 import { listSites, type CollectionSite } from '../api/sites'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -59,10 +62,54 @@ const FORM_DEFAULTS: FetchTaskFormValues = {
   fetch_strategy: 'auto',
 }
 
+/** 单次任务采到的记录展开区 */
+function TaskRecords({ taskId }: { taskId: string }) {
+  const [records, setRecords] = useState<FetchRecord[] | null>(null)
+  const [total, setTotal] = useState(0)
+
+  useEffect(() => {
+    listFetchTaskRecords(taskId)
+      .then((res) => {
+        setRecords(res.items)
+        setTotal(res.total)
+      })
+      .catch((e: unknown) =>
+        toast.error(e instanceof Error ? e.message : '采集记录加载失败'),
+      )
+  }, [taskId])
+
+  if (records === null) {
+    return <p className="py-2 text-sm text-muted-foreground">加载中…</p>
+  }
+  if (records.length === 0) {
+    return <p className="py-2 text-sm text-muted-foreground">该次任务无采集留痕</p>
+  }
+  return (
+    <div className="space-y-1 py-1">
+      <p className="text-sm text-muted-foreground">该次任务采到 {total} 条记录</p>
+      {records.map((r) => (
+        <details key={r.id} className="rounded border px-3 py-1.5 text-sm">
+          <summary className="cursor-pointer">
+            <span className="font-medium">{r.model_id}</span>
+            <span className="ml-2 text-muted-foreground">{r.raw_model_id ?? ''}</span>
+            <span className="ml-2 text-xs text-muted-foreground">
+              {formatTime(r.created_at)}
+            </span>
+          </summary>
+          <pre className="mt-1 max-h-72 overflow-auto rounded bg-muted p-2 text-xs">
+            {JSON.stringify(r.record, null, 2)}
+          </pre>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<FetchTask[]>([])
   const [total, setTotal] = useState(0)
   const [sites, setSites] = useState<CollectionSite[]>([])
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const form = useForm<FetchTaskFormValues>({
     resolver: zodResolver(fetchTaskFormSchema),
@@ -225,6 +272,7 @@ export default function TasksPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>站点</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>领域</TableHead>
@@ -238,32 +286,54 @@ export default function TasksPage() {
             <TableBody>
               {tasks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     暂无任务
                   </TableCell>
                 </TableRow>
               ) : (
-                tasks.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell className="font-medium">{t.source_key}</TableCell>
-                    <TableCell>{t.task_type}</TableCell>
-                    <TableCell>{t.domain ?? '-'}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={t.status} />
-                    </TableCell>
-                    <TableCell>
-                      {t.attempt_count} / {t.hit_count}
-                    </TableCell>
-                    <TableCell>{t.fetch_strategy ?? '自动'}</TableCell>
-                    <TableCell
-                      className="max-w-48 truncate text-muted-foreground"
-                      title={t.error_message ?? undefined}
-                    >
-                      {t.error_message ?? '-'}
-                    </TableCell>
-                    <TableCell>{formatTime(t.created_at)}</TableCell>
-                  </TableRow>
-                ))
+                tasks.map((t) => {
+                  const expanded = expandedId === t.id
+                  return (
+                    <Fragment key={t.id}>
+                      <TableRow
+                        className="cursor-pointer"
+                        onClick={() => setExpandedId(expanded ? null : t.id)}
+                      >
+                        <TableCell>
+                          {expanded ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{t.source_key}</TableCell>
+                        <TableCell>{t.task_type}</TableCell>
+                        <TableCell>{t.domain ?? '-'}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={t.status} />
+                        </TableCell>
+                        <TableCell>
+                          {t.attempt_count} / {t.hit_count}
+                        </TableCell>
+                        <TableCell>{t.fetch_strategy ?? '自动'}</TableCell>
+                        <TableCell
+                          className="max-w-48 truncate text-muted-foreground"
+                          title={t.error_message ?? undefined}
+                        >
+                          {t.error_message ?? '-'}
+                        </TableCell>
+                        <TableCell>{formatTime(t.created_at)}</TableCell>
+                      </TableRow>
+                      {expanded && (
+                        <TableRow>
+                          <TableCell colSpan={9} className="bg-muted/40">
+                            <TaskRecords taskId={t.id} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  )
+                })
               )}
             </TableBody>
           </Table>

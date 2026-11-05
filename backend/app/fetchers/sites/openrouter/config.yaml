@@ -18,7 +18,9 @@ api:
   api_key_ref: env:OPENROUTER_API_KEY # 可选
 normalize:
   defaults:
-    provider: openrouter
+    # 注意：不得声明 defaults.provider——openrouter 是聚合平台而非研发厂商，
+    # 榜单厂商取模型 id 的 vendor 前缀（anthropic/claude-opus-5 -> anthropic）；
+    # 价格域不受影响（_build_price 缺省回落站点 key openrouter）
     currency: USD
     unit: token # OpenRouter pricing.* 为每 token 美元价
   # 多维评分（OpenRouter 响应 benchmarks.artificial_analysis 子对象，覆盖不完整）；

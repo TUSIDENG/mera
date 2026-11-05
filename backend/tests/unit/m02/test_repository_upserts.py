@@ -337,3 +337,154 @@ def test_invalid_record_rolls_back(db_session: Session, method: str) -> None:
             }[method]
         )
     ) == 1
+
+
+class TestSnapshotMergeUpsert:
+    """合并式 upsert（通用路径）：null 维度不覆盖、多来源共存、LLM 分受保护。"""
+
+    def _snapshot(self, db_session: Session, model_id: str = "m") -> ModelSnapshot:
+        return db_session.scalar(
+            select(ModelSnapshot).where(
+                ModelSnapshot.model_id == model_id, ModelSnapshot.domain == "general"
+            )
+        )
+
+    def test_null_dims_do_not_overwrite(self, db_session: Session) -> None:
+        repo = Repository(db_session)
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="p", domain="general",
+                benchmark_score=Decimal("80.0"), score_source="intelligence",
+                scores={"intelligence": 80.0, "coding": 70.0},
+                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        # 第二次采集 coding 维度缺失（null），不得覆盖已有 70.0
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="p", domain="general",
+                benchmark_score=Decimal("81.5"), score_source="intelligence",
+                scores={"intelligence": 81.5, "coding": None},
+                data={"sources": {"aa": {"raw_model_id": "m:v2", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        snap = self._snapshot(db_session)
+        assert snap.scores == {"intelligence": 81.5, "coding": 70.0}
+        assert snap.benchmark_score == Decimal("81.5")
+        # 同源重采覆盖该 source key
+        assert snap.data["sources"]["aa"]["raw_model_id"] == "m:v2"
+
+    def test_multi_source_coexist(self, db_session: Session) -> None:
+        repo = Repository(db_session)
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="anthropic", domain="general",
+                benchmark_score=Decimal("80.0"), score_source="intelligence",
+                scores={"intelligence": 80.0},
+                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="openai", domain="general",
+                benchmark_score=None, score_source=None,
+                scores={"coding": 66.0},
+                data={"sources": {"openrouter": {"raw_model_id": "anthropic/m", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        snap = self._snapshot(db_session)
+        # 不同 source_key 共存
+        assert set(snap.data["sources"]) == {"aa", "openrouter"}
+        # 新维度分并入；主榜分新值为空保留旧值；provider 首采为准
+        assert snap.scores == {"intelligence": 80.0, "coding": 66.0}
+        assert snap.benchmark_score == Decimal("80.0")
+        assert snap.provider == "anthropic"
+
+    def test_llm_scored_row_protected_from_overwrite(self, db_session: Session) -> None:
+        repo = Repository(db_session)
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="p", domain="general",
+                benchmark_score=Decimal("80.0"), score_source="intelligence",
+                scores={"intelligence": 80.0},
+                data={"sources": {"aa": {"raw_model_id": "m", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        repo.apply_llm_score(
+            "m", "general", overall=88.5,
+            dims={"intelligence": 88.5, "coding": 90.0, "agentic": None,
+                  "image": None, "video": None},
+            rationale="基于 AA 采集数据", scorer="deepseek/deepseek-chat",
+        )
+        db_session.commit()
+        snap = self._snapshot(db_session)
+        assert snap.score_source == "llm:deepseek/deepseek-chat"
+        assert snap.data["llm_score"]["rationale"] == "基于 AA 采集数据"
+        # 重采：展示分与 score_source 保留 LLM 结果，仅 data.sources 合并
+        repo.upsert_snapshots([
+            SnapshotRecord(
+                model_id="m", provider="p", domain="general",
+                benchmark_score=Decimal("10.0"), score_source="coding",
+                scores={"intelligence": 10.0, "coding": 10.0},
+                data={"sources": {"openrouter": {"raw_model_id": "m", "record": {}}}},
+            )
+        ])
+        db_session.commit()
+        snap = self._snapshot(db_session)
+        assert snap.score_source == "llm:deepseek/deepseek-chat"
+        assert snap.benchmark_score == Decimal("88.5")
+        assert snap.scores["coding"] == 90.0
+        assert set(snap.data["sources"]) == {"aa", "openrouter"}
+        assert snap.data["llm_score"]["overall"] == 88.5
+
+
+class TestFetchRecords:
+    def test_insert_and_query_by_model_and_task(self, db_session: Session) -> None:
+        import uuid
+
+        from app.db.enums import FetchTaskStatus
+        from app.db.models import FetchTask
+
+        repo = Repository(db_session)
+        task = FetchTask(
+            task_type="model_metrics", source_key="demo", triggered_by="test",
+            status=FetchTaskStatus.RUNNING.value,
+        )
+        db_session.add(task)
+        db_session.commit()
+        count = repo.insert_fetch_records(
+            task.id,
+            [
+                SnapshotRecord(
+                    model_id="gpt-4o", provider="openai", domain="general",
+                    benchmark_score=Decimal("89.5"), score_source="score",
+                    scores={}, data={"sources": {"demo": {}}},
+                    raw_model_id="openai/gpt-4o", source_key="demo",
+                ),
+                SnapshotRecord(
+                    model_id="claude-opus-5", provider="anthropic", domain="general",
+                    benchmark_score=None, score_source=None,
+                    scores={}, data={"sources": {"demo": {}}},
+                    raw_model_id="anthropic/claude-opus-5:batch", source_key="demo",
+                ),
+            ],
+        )
+        db_session.commit()
+        assert count == 2
+        items, total = repo.list_fetch_records_by_model("gpt-4o", limit=10, offset=0)
+        assert total == 1
+        assert items[0].raw_model_id == "openai/gpt-4o"
+        # Decimal 已转 float 以适配 JSONB
+        assert items[0].record["benchmark_score"] == 89.5
+        items, total = repo.list_fetch_records_by_task(task.id, limit=10, offset=0)
+        assert total == 2
+        assert set(repo.fetch_record_keys_by_task(task.id)) == {
+            ("gpt-4o", "general"),
+            ("claude-opus-5", "general"),
+        }
+        assert isinstance(task.id, uuid.UUID)

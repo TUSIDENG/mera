@@ -29,6 +29,14 @@ x-backend-env: &backend-env
   MERA_FETCH_PROXY: ${MERA_FETCH_PROXY:-http://host.docker.internal:6789}
   FRONTEND_URL: http://localhost:3000
   MAX_FETCH_ATTEMPTS: "3"
+  # LLM 离线打分（app/scoring）：开关 + 打分模型提供方与各家 key（无 key 视为关闭）
+  LLM_SCORER_ENABLED: ${LLM_SCORER_ENABLED:-false}
+  LLM_SCORER_PROVIDER: ${LLM_SCORER_PROVIDER:-deepseek}
+  LLM_SCORER_MODEL: ${LLM_SCORER_MODEL:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  CHATGPT_API_KEY: ${CHATGPT_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   TZ: Asia/Shanghai
 
 services:

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.depends import get_repository
 from app.repositories.repository import Repository
 from app.schemas.common import Page, PageParams
-from app.schemas.snapshots import SnapshotOut
+from app.schemas.snapshots import FetchRecordOut, SnapshotOut
 
 router = APIRouter(tags=["models"])
 
@@ -40,3 +40,21 @@ def list_model_snapshots(
     """单模型全部 domain 的历史快照。"""
     items = repo.snapshots_by_model(model_id)
     return [SnapshotOut.model_validate(item) for item in items]
+
+
+@router.get("/models/{model_id}/fetch-records", response_model=Page[FetchRecordOut])
+def list_model_fetch_records(
+    model_id: str,
+    repo: Annotated[Repository, Depends(get_repository)],
+    page_params: Annotated[PageParams, Depends()],
+) -> Page[FetchRecordOut]:
+    """单模型采集历史（按时间倒序）：哪次任务、从哪个平台、采了什么。"""
+    items, total = repo.list_fetch_records_by_model(
+        model_id, limit=page_params.limit, offset=page_params.offset
+    )
+    return Page(
+        items=[FetchRecordOut.model_validate(item) for item in items],
+        total=total,
+        page=page_params.page,
+        page_size=page_params.page_size,
+    )

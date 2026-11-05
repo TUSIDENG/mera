@@ -18,6 +18,9 @@ class SnapshotRecord:
     scores: dict[str, float | None] = field(default_factory=dict)
     score_source: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
+    # 留痕专用（不入 model_snapshots 列）：平台上的原始模型名与来源站点 key
+    raw_model_id: str | None = None
+    source_key: str | None = None
 
 
 @dataclass(frozen=True)

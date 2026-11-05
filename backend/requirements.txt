@@ -15,3 +15,8 @@ pyyaml>=6.0
 pyjwt>=2.9
 cryptography>=43.0
 python-multipart>=0.0.9
+# LLM 离线打分（app/scoring）：LangGraph 管线 + OpenAI 兼容/Gemini chat 模型
+langchain-core>=0.3
+langchain-openai>=0.2
+langchain-google-genai>=2.0
+langgraph>=0.2

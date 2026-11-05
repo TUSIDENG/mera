@@ -139,7 +139,11 @@ def run_fetch(
                 break
             task.log_empty(name)  # normalize 空结果视为未命中，继续降级
 
-        hit_count = _upsert_records(repo, records) if records else 0
+        hit_count = (
+            _upsert_records(repo, records, task_id=getattr(task, "task_id", None))
+            if records
+            else 0
+        )
         attempt += 1
         task.bump_attempt()  # 回写 DB attempt_count，与终态规则（partial 要求 >=1）对齐
         status = decide_run_result(
@@ -171,12 +175,18 @@ def run_fetch(
         )
 
 
-def _upsert_records(repo: Any, records: list[Any]) -> int:
-    """按 DTO 类型路由到 M02 仓储的对应 UPSERT，返回实际落库条数（hit_count）。"""
+def _upsert_records(repo: Any, records: list[Any], task_id: uuid.UUID | None = None) -> int:
+    """按 DTO 类型路由到 M02 仓储的对应 UPSERT，返回实际落库条数（hit_count）。
+
+    model_metrics 记录在 upsert 前追加 fetch_records 留痕（append-only，同事务）；
+    task_id 缺失（如纯编排单测）时跳过留痕。
+    """
     total = 0
     for record_type, method_name in _UPSERT_METHOD.items():
         group = [r for r in records if isinstance(r, record_type)]
         if group:
+            if record_type is SnapshotRecord and task_id is not None:
+                repo.insert_fetch_records(task_id, group)
             total += getattr(repo, method_name)(group)
     unknown = [r for r in records if type(r) not in _UPSERT_METHOD]
     if unknown:
@@ -195,6 +205,10 @@ class RepoTaskHandle:
         self._repo = repo
         self._task_id = task_id
         self.event_log: list[tuple[str, str, str | None]] = []
+
+    @property
+    def task_id(self) -> uuid.UUID:
+        return self._task_id
 
     @property
     def attempt_count(self) -> int:

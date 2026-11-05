@@ -28,7 +28,7 @@ class TestEagerExecution:
         assert result.result == "succeeded"
         assert fetcher.fetch_calls == 1
         assert env.loaded_sites == ["openrouter"]
-        assert env.repo.upserts == [("snapshots", 1)]
+        assert env.repo.upserts == [("fetch_records", 1), ("snapshots", 1)]  # 留痕 + 落库
         assert env.repo.task.status == FetchTaskStatus.SUCCEEDED.value
         assert env.repo.task.fetch_strategy == "openrouter/api"
         assert env.repo.task.hit_count == 1
@@ -154,3 +154,55 @@ class TestOpenRouterSiteSmoke:
         assert site.strategies == ["api"]
         assert [name for name, _ in site.fetchers] == ["api"]
         assert site.skipped == []
+
+
+class TestLlmScoringTrigger:
+    """采集成功后按本次留痕记录触发 LLM 离线打分（开关关闭时跳过）。"""
+
+    def test_triggers_score_tasks_on_success(self, wire_task, monkeypatch):
+        from app.core.config import Settings
+
+        task = make_task_row()
+        env = wire_task(task, make_site([("api", FakeFetcher())]))
+        env.repo.fetch_keys = [("gpt-4o", "general"), ("claude-opus-5", "general")]
+        monkeypatch.setattr(
+            "app.tasks.fetch.get_settings",
+            lambda: Settings(llm_scorer_enabled=True),
+        )
+        enqueued: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "app.tasks.score.enqueue_score",
+            lambda model_id, domain: enqueued.append((model_id, domain)),
+        )
+
+        result = run_fetch_task.delay(str(task.id))
+
+        assert result.result == "succeeded"
+        assert enqueued == [("gpt-4o", "general"), ("claude-opus-5", "general")]
+
+    def test_skipped_when_disabled(self, wire_task, monkeypatch):
+        task = make_task_row()
+        env = wire_task(task, make_site([("api", FakeFetcher())]))
+        env.repo.fetch_keys = [("gpt-4o", "general")]
+        enqueued: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "app.tasks.score.enqueue_score",
+            lambda model_id, domain: enqueued.append((model_id, domain)),
+        )
+
+        result = run_fetch_task.delay(str(task.id))
+
+        assert result.result == "succeeded"
+        assert enqueued == []
+
+
+class TestScoreTaskAssembly:
+    def test_score_task_registered(self):
+        from app.services.enqueue import SCORE_TASK_NAME
+
+        assert SCORE_TASK_NAME in celery_app.tasks
+
+    def test_score_task_route_default_queue(self):
+        from app.services.enqueue import SCORE_TASK_NAME
+
+        assert celery_app.conf.task_routes[SCORE_TASK_NAME] == {"queue": "default"}

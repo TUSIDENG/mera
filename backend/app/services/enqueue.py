@@ -13,6 +13,7 @@ from celery import Celery
 from app.core.config import Settings
 
 FETCH_TASK_NAME = "app.tasks.fetch.run_fetch_task"
+SCORE_TASK_NAME = "app.tasks.score.run_score_task"
 
 _QUEUE_BY_STRATEGY = {
     "api": "fetch_api",

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { apiFetch, type Page } from './client'
+import type { FetchRecord } from './models'
 
 /** 采集任务（与后端 FetchTaskOut 对齐） */
 export interface FetchTask {
@@ -75,5 +76,12 @@ export function createFetchTask(body: FetchTaskCreateBody) {
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+/** 任务维度采集留痕（按时间倒序） */
+export function listFetchTaskRecords(taskId: string, page = 1, pageSize = 50) {
+  return apiFetch<Page<FetchRecord>>(
+    `/fetch-tasks/${taskId}/records?page=${page}&page_size=${pageSize}`,
+  )
 }
 

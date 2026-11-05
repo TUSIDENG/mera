@@ -165,11 +165,11 @@ class TestNormalizeEndToEnd:
         assert truncated is False
         assert len(records) == 1
         record = records[0]
-        assert record.model_id == "claude opus 5.5 (max)"
-        assert record.provider == "Anthropic"  # vendor 映射为 provider
+        assert record.model_id == "claude-opus-5.5"  # 推理档位括号 (max) 剥离，分隔符归一
+        assert record.provider == "anthropic"  # vendor 映射为 provider，统一小写
         assert record.domain == "chat"
         assert record.benchmark_score == Decimal("18.88")
-        assert record.data["rank"] == "1"
+        assert record.data["sources"]["lmarena"]["record"]["rank"] == "1"
 
     def test_provider_fallback_to_site_key(self):
         fetcher = make_fetcher()

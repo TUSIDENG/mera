@@ -123,7 +123,10 @@ class TestFetch:
         records, truncated = fetcher.normalize(PAYLOAD["data"])
         assert truncated is False
         first = records[0]
-        assert first.model_id == "openai/gpt-4o"
-        assert first.provider == "openrouter"  # defaults 填充
-        assert first.data["input_price"] == "0.0000025"
-        assert first.data["context_length"] == 128000
+        assert first.model_id == "gpt-4o"  # vendor 前缀剥离，变体归并
+        assert first.provider == "openai"  # 榜单厂商取模型 id 的 vendor 前缀（真实研发厂商）
+        assert first.raw_model_id == "openai/gpt-4o"
+        entry = first.data["sources"]["openrouter"]
+        assert entry["raw_model_id"] == "openai/gpt-4o"
+        assert entry["record"]["pricing"]["prompt"] == "0.0000025"
+        assert entry["record"]["context_length"] == 128000

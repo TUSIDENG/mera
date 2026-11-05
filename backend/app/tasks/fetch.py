@@ -57,6 +57,7 @@ def run_fetch_task(task_id: str) -> str | None:
                 max_attempts=settings.max_fetch_attempts,
             )
             session.commit()
+            _trigger_llm_scoring(repo, settings, task_uuid)
         except Exception as exc:  # 兜底：不裸抛，避免 broker 层无限重投
             session.rollback()
             logger.exception("采集任务执行异常", extra={"task_id": task_id})
@@ -93,6 +94,27 @@ def select_site_strategies(site: SiteConfig, strategy: str | None) -> SiteConfig
         fetchers=[(name, fetcher) for name, fetcher in site.fetchers if name == strategy],
         skipped=[(name, reason) for name, reason in site.skipped if name == strategy],
     )
+
+
+def _trigger_llm_scoring(
+    repo: Repository, settings, task_uuid: uuid.UUID
+) -> None:
+    """采集成功后按本次留痕记录触发 LLM 离线打分（开关关闭或无留痕时跳过）。
+
+    留痕仅覆盖 model_metrics，价格/成本任务天然不会产生打分触发。
+    """
+    if not settings.llm_scorer_enabled:
+        return
+    from app.tasks.score import enqueue_score
+
+    keys = repo.fetch_record_keys_by_task(task_uuid)
+    for model_id, domain in keys:
+        enqueue_score(model_id, domain)
+    if keys:
+        logger.info(
+            "已触发 LLM 离线打分",
+            extra={"task_id": str(task_uuid), "score_tasks": len(keys)},
+        )
 
 
 def _mark_failed_safely(

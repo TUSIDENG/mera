@@ -60,8 +60,23 @@ class TestCanonicalModelName:
         ("value", "expected"),
         [
             (" GPT-4o ", "gpt-4o"),
-            ("Claude   Sonnet  4", "claude sonnet 4"),
+            ("Claude   Sonnet  4", "claude-sonnet-4"),
             ("glm-4.6", "glm-4.6"),
+            # vendor 前缀剥离
+            ("anthropic/claude-opus-5", "claude-opus-5"),
+            ("openai/gpt-5.1-codex-mini", "gpt-5.1-codex-mini"),  # mini 是独立 SKU，不剥
+            ("~openai/gpt-astra-latest", "gpt-astra-latest"),  # openrouter "~" 别名前缀
+            # 冒号变体后缀剥离（循环）
+            ("claude-opus-5:batch", "claude-opus-5"),
+            ("google/gemini-3-pro:high:batch", "gemini-3-pro"),
+            # 推理档位括号剥离
+            ("claude opus 5.5 (high with fallback)", "claude-opus-5.5"),
+            ("Claude Opus 5.5 (max)", "claude-opus-5.5"),
+            ("Claude Opus 5.5 (high, default fallback)", "claude-opus-5.5"),
+            ("GPT-6.1 Sol (Xhigh)", "gpt-6.1-sol"),
+            # 版本号差异不合并
+            ("claude-opus-5", "claude-opus-5"),
+            ("claude-opus-5.5", "claude-opus-5.5"),
         ],
     )
     def test_normalize(self, value, expected):
@@ -96,7 +111,13 @@ class TestNormalizeRecords:
                 benchmark_score=Decimal("89.5"),
                 scores={},
                 score_source="score",
-                data={"extra": 1},
+                data={
+                    "sources": {
+                        "demo": {"raw_model_id": "GPT-4o", "record": raw[0]},
+                    }
+                },
+                raw_model_id="GPT-4o",
+                source_key="demo",
             )
         ]
 
@@ -122,7 +143,8 @@ class TestNormalizeRecords:
         assert records[1].score_source == "coding"
         assert records[2].benchmark_score is None
         assert records[2].score_source is None
-        assert records[0].data["aa"]  # 原始维度路径保留在 data
+        # 原始维度路径保留在 data.sources 的采集记录里
+        assert records[0].data["sources"]["demo"]["record"]["aa"]
 
     def test_api_price_record(self):
         cfg = snapshot_cfg(data_type="api_price")
@@ -139,8 +161,8 @@ class TestNormalizeRecords:
         )
         assert len(records) == 1
         record = records[0]
-        assert record.model_id == "openai/gpt-5"
-        assert record.provider == "openrouter"
+        assert record.model_id == "gpt-5"  # vendor 前缀剥离，便于与榜单按 model_id 关联
+        assert record.provider == "openrouter"  # 价格域保留聚合平台作为厂商
         assert record.input_price == Decimal("0.00000075")
         assert record.output_price is None
         assert record.currency == "USD"
@@ -161,14 +183,32 @@ class TestNormalizeRecords:
         )
         assert len(records) == 1
 
-    def test_provider_from_defaults(self):
+    def test_provider_vendor_prefix_wins_over_defaults(self):
+        """榜单厂商优先取模型 id 的 vendor 前缀（真实研发厂商），defaults 不覆盖。"""
         cfg = snapshot_cfg()
         cfg["normalize"] = {
             "defaults": {"provider": "openrouter"},
             "fields": {"model_id": "id"},
         }
         records, _ = normalize_records([{"id": "a/b"}], cfg)
-        assert records[0].provider == "openrouter"
+        assert records[0].provider == "a"
+
+    def test_provider_lowercased(self):
+        """provider 统一小写（OpenAI/openai 归一，避免同一厂商多行）。"""
+        cfg = snapshot_cfg()
+        cfg["normalize"]["fields"] = {"model_id": "model", "provider": "vendor"}
+        records, _ = normalize_records([{"model": "m", "vendor": "Anthropic"}], cfg)
+        assert records[0].provider == "anthropic"
+
+    def test_provider_defaults_fallback_without_vendor(self):
+        """无 vendor 前缀且记录缺 provider 时回落 defaults（单来源站点）。"""
+        cfg = snapshot_cfg()
+        cfg["normalize"] = {
+            "defaults": {"provider": "aider"},
+            "fields": {"model_id": "id"},
+        }
+        records, _ = normalize_records([{"id": "gpt-4o"}], cfg)
+        assert records[0].provider == "aider"
 
     def test_nested_field_path(self):
         cfg = snapshot_cfg()
@@ -176,8 +216,9 @@ class TestNormalizeRecords:
         records, _ = normalize_records(
             [{"id": "m", "provider": "p", "pricing": {"prompt": "$3.00"}}], cfg
         )
-        assert records[0].data["input_price"] == "$3.00"
-        assert "pricing" not in records[0].data  # 已消费的顶层键不重复进 data
+        # 原始字段完整保留在 data.sources 的采集记录里
+        entry = records[0].data["sources"]["demo"]["record"]
+        assert entry["pricing"] == {"prompt": "$3.00"}
 
     def test_dirty_records_dropped_without_raising(self):
         raw = [
@@ -189,7 +230,7 @@ class TestNormalizeRecords:
         assert len(records) == 1
         assert records[0].benchmark_score is None
         assert records[0].score_source is None
-        assert records[0].data["score_raw"] == "N/A"
+        assert records[0].data["sources"]["demo"]["score_raw"] == "N/A"
 
     def test_dict_payload_with_truncated_flag(self):
         raw = {"records": [{"model": "m", "score": "1"}], "truncated": True}

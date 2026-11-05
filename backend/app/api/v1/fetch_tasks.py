@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -13,6 +14,7 @@ from app.fetchers.config_loader import SITES_DIR, site_data_types
 from app.repositories.dto import CreateTaskParams
 from app.repositories.repository import Repository
 from app.schemas.common import Page, PageParams
+from app.schemas.snapshots import FetchRecordOut
 from app.schemas.tasks import FetchTaskCreate, FetchTaskOut
 from app.services.enqueue import FetchTaskEnqueuer
 
@@ -67,6 +69,24 @@ def list_fetch_tasks(
     )
     return Page(
         items=[FetchTaskOut.model_validate(item) for item in items],
+        total=total,
+        page=page_params.page,
+        page_size=page_params.page_size,
+    )
+
+
+@router.get("/{task_id}/records", response_model=Page[FetchRecordOut])
+def list_task_records(
+    task_id: uuid.UUID,
+    repo: Annotated[Repository, Depends(get_repository)],
+    page_params: Annotated[PageParams, Depends()],
+) -> Page[FetchRecordOut]:
+    """任务维度采集留痕（按时间倒序）：该次任务采到的记录明细。"""
+    items, total = repo.list_fetch_records_by_task(
+        task_id, limit=page_params.limit, offset=page_params.offset
+    )
+    return Page(
+        items=[FetchRecordOut.model_validate(item) for item in items],
         total=total,
         page=page_params.page,
         page_size=page_params.page_size,

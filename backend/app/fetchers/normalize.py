@@ -34,6 +34,13 @@ DATA_TYPES = {"model_metrics", "infrastructure_cost", "subscription_plan", "api_
 
 _NUMBER_RE = re.compile(r"-?\d+(?:,\d{3})*(?:\.\d+)?")
 _WS_RE = re.compile(r"\s+")
+# 变体归并规则（canonical_model_name）
+# vendor 前缀：anthropic/claude-opus-5；openrouter 的 "~" 前缀别名 id 一并识别（~openai/gpt-x-latest）
+_VENDOR_OF_RE = re.compile(r"^~?([a-z0-9_.-]+)/")
+_VARIANT_SUFFIX_RE = re.compile(r":[a-z][a-z0-9-]*$")  # 冒号变体后缀（:batch），版本号 :5 不剥
+# 推理档位括号：(high)/(max)/(xhigh)/(high with fallback)/(high, default fallback) 等
+_EFFORT_PARENS_RE = re.compile(r"\((?:high|medium|low|minimal|max|xhigh)\b[^)]*\)$")
+_SEP_RE = re.compile(r"[\s_]+")
 
 # 各数据类型参与映射的标准字段（未在 fields 声明时按同名恒等取值）
 _STANDARD_FIELDS: dict[str, tuple[str, ...]] = {
@@ -73,11 +80,31 @@ def parse_price(value: Any) -> Decimal | None:
 
 
 def canonical_model_name(value: Any) -> str | None:
-    """模型名规范化：去首尾空白、压缩内部空白、统一小写；空值返回 None。"""
+    """模型名规范化（变体归并）：去 vendor 前缀、冒号变体后缀（:batch 等）、
+    推理档位括号（(high with fallback) 等），空白/下划线归一为连字符，统一小写。
+
+    版本号差异不合并（claude-opus-5 ≠ claude-opus-5.5）；独立 SKU 不剥离
+    （gpt-5.1-codex-mini 的 mini 保留，只剥冒号后缀）。空值返回 None。
+    """
     if not isinstance(value, str):
         return None
     name = _WS_RE.sub(" ", value.strip()).lower()
+    if not name:
+        return None
+    name = _VENDOR_OF_RE.sub("", name, count=1).lstrip("~")
+    while (stripped := _VARIANT_SUFFIX_RE.sub("", name)) != name:
+        name = stripped
+    name = _EFFORT_PARENS_RE.sub("", name).strip()
+    name = _SEP_RE.sub("-", name)
     return name or None
+
+
+def vendor_prefix(value: Any) -> str | None:
+    """从带 vendor 前缀的模型 id（anthropic/claude-opus-5）取厂商名；无前缀返回 None。"""
+    if not isinstance(value, str):
+        return None
+    match = _VENDOR_OF_RE.match(value.strip().lower())
+    return match.group(1) if match else None
 
 
 def normalize_records(
@@ -160,9 +187,17 @@ def _build_snapshot(
     scores_map: dict[str, str],
     item: dict,
 ) -> SnapshotRecord | None:
-    model_id = canonical_model_name(values.get("model_id"))
-    # 单来源站点 provider 缺失时回落站点 key（如 aider_leaderboard）
-    provider = _clean_str(values.get("provider")) or _clean_str(cfg.get("key"))
+    raw_model_id = _clean_str(values.get("model_id"))
+    model_id = canonical_model_name(raw_model_id)
+    # 厂商取值：模型 id 的 vendor 前缀（真实研发厂商）-> 记录自带 provider -> 站点 key 兜底；
+    # 聚合平台（如 openrouter）不允许兜底成榜单厂商，其 config 不得声明 defaults.provider。
+    # 统一小写避免同一厂商多写法（OpenAI/openai）各占一行
+    provider = (
+        vendor_prefix(raw_model_id)
+        or _clean_str(values.get("provider"))
+        or _clean_str(cfg.get("key"))
+    )
+    provider = provider.lower() if provider else None
     if not model_id or not provider:
         return None
 
@@ -175,10 +210,12 @@ def _build_snapshot(
     score = parse_score(values.get("score"))
     score_source: str | None = None
     raw_score = values.get("score")
+    # 采集数据包一层 sources：记录评测的具体变体与原始记录，多来源在仓储层合并
+    source_entry: dict[str, Any] = {"raw_model_id": raw_model_id, "record": item}
     if score is not None:
         score_source = "score"
     elif raw_score is not None:
-        data.setdefault("score_raw", raw_score)
+        source_entry["score_raw"] = raw_score
     if score is None:
         for dim in _SCORE_FALLBACK_ORDER:
             dim_score = scores.get(dim)
@@ -194,7 +231,9 @@ def _build_snapshot(
         benchmark_score=score,
         scores=scores,
         score_source=score_source,
-        data=data,
+        data={"sources": {str(cfg.get("key") or ""): source_entry}},
+        raw_model_id=raw_model_id,
+        source_key=str(cfg.get("key") or "") or None,
     )
 
 

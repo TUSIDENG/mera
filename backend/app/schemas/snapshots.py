@@ -22,3 +22,18 @@ class SnapshotOut(BaseModel):
     score_source: str | None
     data: dict[str, Any]
     updated_at: datetime
+
+
+class FetchRecordOut(BaseModel):
+    """采集留痕行：哪次任务、从哪个平台、采了什么（标准化后的完整记录）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    source_key: str
+    model_id: str
+    raw_model_id: str | None
+    domain: str
+    record: dict[str, Any]
+    created_at: datetime
