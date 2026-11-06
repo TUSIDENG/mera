@@ -6,6 +6,8 @@ label: OpenRouter
 domain: general
 data_type: model_metrics
 data_types: [model_metrics, api_price]
+description: 模型聚合平台的公开模型目录 API（JSON），覆盖各厂商模型的上下文长度、人工分析子指数与按 token 价格，适合大批量刷新榜单与价格。
+homepage: https://openrouter.ai/models
 auth_required: false
 strategies: [api]
 rate_limit_per_min: 30

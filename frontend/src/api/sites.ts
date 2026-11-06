@@ -8,6 +8,10 @@ export interface CollectionSite {
   data_type: string
   /** 该站点支持的任务类型（前端据此过滤 task_type 选项） */
   data_types: string[]
+  /** 站点说明（可选） */
+  description: string | null
+  /** 站点官网地址（可选） */
+  homepage: string | null
 }
 
 export function listSites() {

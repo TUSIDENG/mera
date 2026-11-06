@@ -11,3 +11,6 @@ class SiteOut(BaseModel):
     domain: str | None
     data_type: str
     data_types: list[str]
+    # 站点说明与官网地址（可选）
+    description: str | None = None
+    homepage: str | None = None

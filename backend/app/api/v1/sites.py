@@ -30,6 +30,8 @@ def list_collection_sites(
             domain=site.domain,
             data_type=site.data_type,
             data_types=list(site.data_types),
+            description=site.description,
+            homepage=site.homepage,
         )
         for site in list_sites(SITES_DIR)
     ]

@@ -4,6 +4,8 @@ key: lmarena
 label: LMArena
 domain: chat # 人类偏好信号独立 domain，避免与 artificial_analysis 的 general 业务键互相覆盖
 data_type: model_metrics
+description: 人类盲测偏好榜（Chatbot Arena），分数来自真实用户两两对战的胜率，反映对话体验；公开页面有 Cloudflare 风控，需低频采集。
+homepage: https://lmarena.ai/leaderboard
 auth_required: false
 strategies: [playwright]
 rate_limit_per_min: 2

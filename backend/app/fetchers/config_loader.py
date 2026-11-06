@@ -41,6 +41,9 @@ class SiteMeta:
     domain: str | None
     data_type: str
     data_types: tuple[str, ...]
+    # 站点说明与官网地址（可选，供前端展示来源背景）
+    description: str | None = None
+    homepage: str | None = None
 
 
 @dataclass
@@ -144,6 +147,8 @@ def list_sites(sites_dir: str | Path) -> list[SiteMeta]:
                 domain=cfg.get("domain"),
                 data_type=cfg["data_type"],
                 data_types=_resolve_data_types(cfg, entry.name),
+                description=_clean_str(cfg.get("description")),
+                homepage=_clean_str(cfg.get("homepage")),
             )
         )
     return sites

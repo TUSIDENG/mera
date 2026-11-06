@@ -3,6 +3,8 @@ key: aider_leaderboard
 label: Aider Leaderboard
 domain: coding
 data_type: model_metrics
+description: Aider 代码编辑基准榜，用多语言真实代码修改任务衡量模型的编辑通过率与成本，可作为编程能力的补充信号。
+homepage: https://aider.chat/docs/leaderboards/
 auth_required: false
 strategies: [playwright]
 rate_limit_per_min: 5

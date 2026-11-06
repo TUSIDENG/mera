@@ -5,6 +5,8 @@ label: Artificial Analysis
 domain: general
 data_type: model_metrics
 data_types: [model_metrics]
+description: 独立评测机构榜单，公开榜单页内嵌结构化数据，提供 Intelligence Index 等综合与专项指数，主榜分优先级最高。
+homepage: https://artificialanalysis.ai/leaderboards/models
 auth_required: false
 strategies: [reverse_api, playwright]
 rate_limit_per_min: 10

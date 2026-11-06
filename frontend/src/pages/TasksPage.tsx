@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
@@ -177,7 +177,7 @@ export default function TasksPage() {
           <CardTitle>手动触发采集</CardTitle>
           <CardDescription>采集策略缺省时由编排层按站点配置自动降级</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <form onSubmit={(e) => void onSubmit(e)} className="flex flex-wrap items-end gap-3">
             <div className="w-44 space-y-1.5">
               <Label htmlFor="task_type">任务类型</Label>
@@ -260,6 +260,42 @@ export default function TasksPage() {
               {form.formState.isSubmitting ? '提交中…' : '触发采集'}
             </Button>
           </form>
+
+          <div className="rounded border p-3 text-sm">
+            {selectedSite ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{selectedSite.label}</span>
+                  {selectedSite.homepage && (
+                    <a
+                      href={selectedSite.homepage}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-blue-600 hover:underline"
+                    >
+                      访问官网
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  {selectedSite.description ?? '该站点未提供说明'}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-muted-foreground">支持采集：</span>
+                  {selectedSite.data_types.map((t) => (
+                    <Badge key={t} variant="secondary">
+                      {TASK_TYPE_LABELS[t as TaskType] ?? t}
+                    </Badge>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                选择采集站点后，这里会显示站点说明与可采集的信息。
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
