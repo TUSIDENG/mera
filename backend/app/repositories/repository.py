@@ -76,6 +76,21 @@ _SOURCE_PRIORITY = {
 }
 _DEFAULT_SOURCE_PRIORITY = 9
 
+# 这些 provider 值只是采集站点兜底（或旧版站点默认值），不代表真实厂商：
+# 一旦后续采集能推断出真实厂商，应覆盖它们，避免同一模型一直挂在站点名下。
+_SITE_PROVIDERS = frozenset(
+    {"aider", "aider_leaderboard", "lmarena", "artificial_analysis", "openrouter"}
+)
+
+
+def _prefer_provider(existing: str | None, incoming: str | None) -> str | None:
+    """合并厂商：真实厂商优先，站点兜底值可被覆盖。"""
+    if not incoming:
+        return existing
+    if not existing or existing in _SITE_PROVIDERS:
+        return incoming
+    return existing
+
 
 def _snapshot_orm_dict(record: SnapshotRecord) -> dict[str, Any]:
     return {k: v for k, v in record.__dict__.items() if k in _SNAPSHOT_ORM_FIELDS}
@@ -171,7 +186,7 @@ class Repository:
             if existing is None:
                 self.session.add(ModelSnapshot(**_snapshot_orm_dict(record)))
             else:
-                existing.provider = existing.provider or record.provider
+                existing.provider = _prefer_provider(existing.provider, record.provider)
                 existing.data = _merge_data(existing.data, record.data)
         # 合并 sources 后按来源优先级重算主榜分与维度分（LLM 打分的行不覆盖）
         self._recompute_snapshot_scores({record.model_id for record in records})

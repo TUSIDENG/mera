@@ -153,6 +153,49 @@ def test_upsert_snapshots_supports_partial_conflict_batch(db_session: Session) -
     assert db_session.scalar(select(func.count()).select_from(ModelSnapshot)) == 2
 
 
+def test_upsert_snapshots_replaces_site_provider(db_session: Session) -> None:
+    """站点兜底厂商（旧数据的 aider）在能推断出真实厂商后被覆盖，真实厂商之间不互相覆盖。"""
+    repo = Repository(db_session)
+    repo.upsert_snapshots([
+        SnapshotRecord(
+            model_id="gpt-5",
+            provider="aider",
+            domain="coding",
+            benchmark_score=Decimal("88.00"),
+            source_key="aider_leaderboard",
+            data={"sources": {"aider_leaderboard": {"benchmark_score": 88.0, "record": {}}}},
+        )
+    ])
+    db_session.commit()
+
+    repo.upsert_snapshots([
+        SnapshotRecord(
+            model_id="gpt-5",
+            provider="openai",
+            domain="coding",
+            benchmark_score=Decimal("88.00"),
+            source_key="aider_leaderboard",
+            data={"sources": {"aider_leaderboard": {"benchmark_score": 88.0, "record": {}}}},
+        )
+    ])
+    db_session.commit()
+    assert db_session.scalar(select(ModelSnapshot)).provider == "openai"
+
+    # 已有真实厂商时，后续来源的站点兜底值不覆盖
+    repo.upsert_snapshots([
+        SnapshotRecord(
+            model_id="gpt-5",
+            provider="lmarena",
+            domain="chat",
+            benchmark_score=Decimal("90.00"),
+            source_key="lmarena",
+            data={"sources": {"lmarena": {"benchmark_score": 90.0, "record": {}}}},
+        )
+    ])
+    db_session.commit()
+    assert db_session.scalar(select(ModelSnapshot)).provider == "openai"
+
+
 def test_upsert_costs_uses_type_name_region_key(db_session: Session) -> None:
     repo = Repository(db_session)
     record = CostRecord(

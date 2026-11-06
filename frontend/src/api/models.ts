@@ -52,6 +52,24 @@ export function listModels(page = 1, pageSize = 100) {
   return apiFetch<Page<Snapshot>>(`/models?page=${page}&page_size=${pageSize}`)
 }
 
+/** 榜单页最多展示的模型数（后端单页上限 100，超出部分按页补齐） */
+export const LEADERBOARD_MODEL_LIMIT = 300
+
+/** 拉取榜单前 limit 个模型：按后端分页上限循环取页，避免一次请求过大 */
+export async function listTopModels(limit = LEADERBOARD_MODEL_LIMIT): Promise<Page<Snapshot>> {
+  const pageSize = 100
+  const first = await listModels(1, pageSize)
+  const items = [...first.items]
+  let page = 1
+  while (items.length < limit && items.length < first.total) {
+    page += 1
+    const next = await listModels(page, pageSize)
+    if (next.items.length === 0) break
+    items.push(...next.items)
+  }
+  return { ...first, items: items.slice(0, limit) }
+}
+
 /** 单模型当前快照（一个模型一行，返回 0 或 1 条） */
 export function listModelSnapshots(modelId: string) {
   return apiFetch<Snapshot[]>(`/models/${encodeURIComponent(modelId)}/snapshots`)

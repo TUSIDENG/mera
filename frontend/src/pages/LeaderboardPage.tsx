@@ -8,7 +8,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Info } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { listModels, type Snapshot } from '../api/models'
+import { listTopModels, type Snapshot } from '../api/models'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
@@ -58,7 +58,7 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     setLoading(true)
-    listModels()
+    listTopModels()
       .then((res) => {
         setItems(res.items)
         // 重置平台筛选

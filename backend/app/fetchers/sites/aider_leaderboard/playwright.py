@@ -11,15 +11,58 @@ from typing import Any
 from app.fetchers.base import BaseFetcher, collect_paginated_rows, parse_dom_rows
 from app.fetchers.proxy import proxy_kwargs
 
+# 榜单表格无厂商列，按模型名前缀归并到与 openrouter 一致的厂商名；
+# 前缀按“更具体优先”排列（如 qwq 先于 qwen、chatgpt 先于 gpt）
+_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("chatgpt", "openai"),
+    ("claude", "anthropic"),
+    ("codestral", "mistralai"),
+    ("command", "cohere"),
+    ("deepseek", "deepseek"),
+    ("gemini", "google"),
+    ("gemma", "google"),
+    ("gpt", "openai"),
+    ("grok", "x-ai"),
+    ("kimi", "moonshotai"),
+    ("llama", "meta"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("openhands", "all-hands"),
+    ("optimus", "openrouter"),
+    ("qwq", "qwen"),
+    ("qwen", "qwen"),
+    ("quasar", "openrouter"),
+    ("yi", "01-ai"),
+)
+
+UNKNOWN_PROVIDER = "unknown"
+
+
+def guess_provider(model: Any) -> str:
+    """由模型名推断厂商；无法识别时返回 unknown（不回落成站点 key，避免伪造厂商）。"""
+    name = str(model or "").strip().lower()
+    for prefix, vendor in _VENDOR_PREFIXES:
+        if name.startswith(prefix):
+            return vendor
+    return UNKNOWN_PROVIDER
+
+
+def _with_provider(items: list[dict]) -> list[dict]:
+    """补齐厂商字段（供 normalize.fields.provider 读取）。"""
+    for item in items:
+        item["provider"] = guess_provider(item.get("model"))
+    return items
+
 
 def parse_dom(rows: list[Any], fields: dict[str, str]) -> list[dict]:
     """DOM 解析纯函数（字段选择器来自 config.yaml）。"""
-    return parse_dom_rows(rows, fields)
+    return _with_provider(parse_dom_rows(rows, fields))
 
 
 def collect_rows(page: Any, pw_cfg: dict) -> list[dict]:
     """翻页采集循环（本站点为单页榜单，next_selector 为空时采一页即止）。"""
-    return collect_paginated_rows(page, pw_cfg)
+    return _with_provider(collect_paginated_rows(page, pw_cfg))
 
 
 class Fetcher(BaseFetcher):

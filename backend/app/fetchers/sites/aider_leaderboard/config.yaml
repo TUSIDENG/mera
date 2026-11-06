@@ -15,13 +15,14 @@ playwright:
   url: https://aider.chat/docs/leaderboards/
   rows_selector: "table tbody tr"
   next_selector: null # 单页榜单，无翻页
+  # 表格列：1 展开箭头 / 2 模型 / 3 正确率 / 4 成本 / 5 命令 / 6 编辑格式正确率 / 7 编辑格式
   fields:
     model: "td:nth-child(2)"
     score: "td:nth-child(3)"
-    cost: "td:nth-child(5)"
+    cost: "td:nth-child(4)"
 normalize:
-  defaults:
-    provider: aider
   fields:
     model_id: model
     score: score
+    # 厂商由 playwright.collect_rows 按模型名推断后注入（榜单本身无厂商列）
+    provider: provider
