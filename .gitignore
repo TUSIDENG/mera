@@ -35,6 +35,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# 本地计划/上下文文档
+.trae/
+
 # Local RPA and fetch outputs
 output/
 rpa-output/
