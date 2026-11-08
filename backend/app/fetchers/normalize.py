@@ -44,7 +44,7 @@ _SEP_RE = re.compile(r"[\s_]+")
 
 # 各数据类型参与映射的标准字段（未在 fields 声明时按同名恒等取值）
 _STANDARD_FIELDS: dict[str, tuple[str, ...]] = {
-    "model_metrics": ("model_id", "provider", "score"),
+    "model_metrics": ("model_id", "provider", "score", "domain"),
     "infrastructure_cost": ("cost_type", "name", "unit", "price", "region", "is_active"),
     "subscription_plan": (
         "provider",
@@ -180,6 +180,15 @@ def _normalize_item(
     return _build_plan(values, data, cfg)
 
 
+def _source_key(cfg: dict, domain: str) -> str:
+    """来源键：默认站点 key；声明 source_key_template 时按领域展开（如 lmarena_chat）。"""
+    key = _clean_str(cfg.get("key")) or ""
+    template = _clean_str(cfg.get("source_key_template"))
+    if not template:
+        return key
+    return template.replace("{key}", key).replace("{domain}", domain)
+
+
 def _build_snapshot(
     values: dict,
     data: dict,
@@ -207,22 +216,30 @@ def _build_snapshot(
         for dim, path in scores_map.items()
     }
 
-    score = parse_score(values.get("score"))
-    score_source: str | None = None
     raw_score = values.get("score")
+    score = parse_score(raw_score)
+    score_source: str | None = None
+    # 领域：记录自带（同站多领域）优先，其次站点配置，最后 general
+    domain = _clean_str(values.get("domain")) or _clean_str(cfg.get("domain")) or "general"
+    # 量纲不可比的来源（如 LMArena Elo/百分比）只记维度分，不参与跨源主榜分
+    score_as_dimension = bool((cfg.get("normalize") or {}).get("score_as_dimension"))
     # 采集数据包一层 sources：记录该来源所属榜单域、评测的具体变体与原始记录，
     # 多来源/多域在仓储层按 model_id 合并到同一行
-    domain = str(cfg.get("domain") or "general")
+    source_key = _source_key(cfg, domain)
     source_entry: dict[str, Any] = {
         "raw_model_id": raw_model_id,
         "domain": domain,
         "record": item,
     }
-    if score is not None:
+    if score_as_dimension:
+        if score is not None:
+            scores[domain] = float(score)
+        score = None
+    elif score is not None:
         score_source = "score"
     elif raw_score is not None:
         source_entry["score_raw"] = raw_score
-    if score is None:
+    if score is None and not score_as_dimension:
         for dim in _SCORE_FALLBACK_ORDER:
             dim_score = scores.get(dim)
             if dim_score is not None:
@@ -241,9 +258,9 @@ def _build_snapshot(
         benchmark_score=score,
         scores=scores,
         score_source=score_source,
-        data={"sources": {str(cfg.get("key") or ""): source_entry}},
+        data={"sources": {source_key: source_entry}},
         raw_model_id=raw_model_id,
-        source_key=str(cfg.get("key") or "") or None,
+        source_key=source_key or None,
     )
 
 

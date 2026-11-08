@@ -41,4 +41,18 @@ class TestSiteDirectory:
             assert site.cfg["rate_limit_per_min"] > 0
             assert site.cfg["compliance"]["public_only"] is True
             assert site.data_type == "model_metrics"
-            assert site.domain
+            if key != "lmarena":  # 多领域站点不声明单一 domain，领域由 playwright.pages 给出
+                assert site.domain
+
+    def test_lmarena_covers_all_five_domains(self):
+        site = load_site(SITES_DIR, "lmarena")
+        pages = site.cfg["playwright"]["pages"]
+        assert [page["domain"] for page in pages] == [
+            "chat",
+            "agent",
+            "code",
+            "image",
+            "video",
+        ]
+        # Elo/百分比量纲只写维度分，不参与跨源主榜分
+        assert site.cfg["normalize"]["score_as_dimension"] is True

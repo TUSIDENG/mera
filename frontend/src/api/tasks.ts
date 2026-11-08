@@ -41,7 +41,11 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
 export const DOMAIN_LABELS: Record<string, string> = {
   general: '通用',
   chat: '对话',
+  agent: '智能体',
+  code: '代码',
   coding: '代码',
+  image: '图像',
+  video: '视频',
 }
 
 /**

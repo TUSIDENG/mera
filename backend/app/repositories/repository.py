@@ -68,6 +68,7 @@ _SNAPSHOT_ORM_FIELDS = (
 
 # 采集源优先级（数值越小越权威）：主榜分与各维度分统一按此顺序取第一个非空来源。
 # openrouter 附带的是 Artificial Analysis 指数（与 AA 站点同源），故排在 AA 之后。
+# lmarena_* 多领域 variant 同源同级，前缀匹配到同一优先级。
 _SOURCE_PRIORITY = {
     "artificial_analysis": 0,
     "openrouter": 1,
@@ -78,16 +79,36 @@ _DEFAULT_SOURCE_PRIORITY = 9
 
 # 这些 provider 值只是采集站点兜底（或旧版站点默认值），不代表真实厂商：
 # 一旦后续采集能推断出真实厂商，应覆盖它们，避免同一模型一直挂在站点名下。
+# lmarena_* variant key（vendor 缺失时 cfg.key 回落）也属站点兜底。
 _SITE_PROVIDERS = frozenset(
     {"aider", "aider_leaderboard", "lmarena", "artificial_analysis", "openrouter"}
 )
+
+
+def _source_priority(source_key: str) -> int:
+    """取来源优先级：精确匹配优先，否则按 lmarena_* 等前缀回落到父级优先级。"""
+    if source_key in _SOURCE_PRIORITY:
+        return _SOURCE_PRIORITY[source_key]
+    for prefix, priority in _SOURCE_PRIORITY.items():
+        if source_key.startswith(f"{prefix}_"):
+            return priority
+    return _DEFAULT_SOURCE_PRIORITY
+
+
+def _is_site_provider(provider: str | None) -> bool:
+    """判断 provider 是否为站点兜底值（含 lmarena_* variant）。"""
+    if not provider:
+        return False
+    if provider in _SITE_PROVIDERS:
+        return True
+    return any(provider.startswith(f"{p}_") for p in _SITE_PROVIDERS)
 
 
 def _prefer_provider(existing: str | None, incoming: str | None) -> str | None:
     """合并厂商：真实厂商优先，站点兜底值可被覆盖。"""
     if not incoming:
         return existing
-    if not existing or existing in _SITE_PROVIDERS:
+    if not existing or _is_site_provider(existing):
         return incoming
     return existing
 
@@ -153,7 +174,7 @@ def _aggregate_from_sources(
     sources = (data or {}).get("sources") or {}
     ordered = sorted(
         sources.items(),
-        key=lambda kv: _SOURCE_PRIORITY.get(kv[0], _DEFAULT_SOURCE_PRIORITY),
+        key=lambda kv: _source_priority(kv[0]),
     )
     dims: dict[str, float] = {}
     benchmark: Decimal | None = None

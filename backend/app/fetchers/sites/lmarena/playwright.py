@@ -2,29 +2,47 @@
 
 LMArena 为 Cloudflare 强风控公开页，属指南 M06.2 指定的指纹浏览器场景；
 本站点不提供无指纹降级（普通 Chromium 基本无法通过风控）。
-parse_dom/collect_rows 可注入假 page 单测；fetch() 只做浏览器编排。
+parse_leaderboard/collect_rows 可注入假元素单测；fetch() 只做浏览器编排。
+
+页面结构（arena.ai，Next.js SSR）：所有领域榜单均为 <table class="table-fixed">，
+模型名在 td 内的 span[title]，厂商在 svg <title>，分数量级与所在列因领域而异，
+由 config.playwright.pages 的 domain / score_column / score_type 控制。
+单站点覆盖五个领域：fetch() 依次访问每个领域页面，记录带各自 domain。
 """
 
 from __future__ import annotations
 
 import importlib.util
+import re
 from typing import Any
 
 from app.core.exceptions import ConfigError, FetchFailed
 from app.fetchers.base import BaseFetcher
 from app.fetchers.proxy import proxy_kwargs
 
+# 取文本中第一个数字（支持百分号、正负误差、千分位），如 "1541±15" -> "1541"
+_NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 
-def parse_leaderboard(rows: list[Any]) -> list[dict]:
-    """榜单行解析纯函数（row 为含 span[title] 的容器元素，可注入假元素单测）。
 
-    行结构（arena.ai 新站，非 table）：排名数字 + 厂商 svg<title> + 模型名 span[title] + 百分数。
-    模型名优先取 title 属性（inner_text 可能被 truncate 截断）。
+def _extract_number(text: str) -> str:
+    match = _NUMBER_RE.search(text or "")
+    return match.group(0).replace(",", "") if match else ""
+
+
+def parse_leaderboard(
+    rows: list[Any], score_column: int, score_type: str = "absolute", domain: str = ""
+) -> list[dict]:
+    """榜单行解析纯函数（row 为 <tr> 元素，可注入假元素单测）。
+
+    - 模型名取 span[title] 的 title 属性（inner_text 可能被截断）
+    - 厂商取 svg <title> 的 text_content
+    - 分数从第 score_column 个 td 提取首个数字
+    - domain 标识该页所属领域，供标准化时写成维度分
     """
     records = []
-    seen: set[str] = set()  # 页面含隐藏副本 DOM，按模型名去重（保留首条带排名的）
+    seen: set[str] = set()
     for row in rows:
-        title_el = row.query_selector("span[title]")
+        title_el = row.query_selector("td span[title]")
         model = ""
         if title_el is not None:
             model = title_el.get_attribute("title") or title_el.inner_text() or ""
@@ -33,38 +51,36 @@ def parse_leaderboard(rows: list[Any]) -> list[dict]:
             continue
         seen.add(model)
         vendor_el = row.query_selector("svg title")
-        # svg <title> 不是 HTMLElement，inner_text 会抛错，须用 text_content
         vendor = (vendor_el.text_content() or "") if vendor_el is not None else ""
-        tokens = (row.inner_text() or "").split()
-        rank = next((t for t in tokens if t.strip().isdigit()), "")
-        score = next((t for t in reversed(tokens) if t.strip().endswith("%")), "")
+        cells = row.query_selector_all("td")
+        score_text = ""
+        if 1 <= score_column <= len(cells):
+            score_text = cells[score_column - 1].inner_text() or ""
+        score = _extract_number(score_text)
         records.append(
             {
-                "rank": rank,
-                "model": model.strip(),
+                "model": model,
                 "vendor": vendor.strip(),
-                "score": score.rstrip("%"),
+                "score": score,
+                "domain": domain,
+                "score_type": score_type,
+                "score_raw": score_text.strip(),
             }
         )
     return records
 
 
-def collect_rows(page: Any, pw_cfg: dict) -> list[dict]:
-    """单页采集：等榜单行出现后，仅解析首个 section（主榜单）内的行（无翻页）。
-
-    页面含多个 figure 区块（主榜单 + 次要榜单/隐藏副本），行结构相同会误匹配，
-    须以 section_selector 首个命中元素为解析范围。
-    """
-    section_sel = str(pw_cfg.get("section_selector") or "").strip()
+def collect_rows(page: Any, pw_cfg: dict, page_cfg: dict) -> list[dict]:
+    """单页采集：等榜单行出现后解析（无翻页）。"""
     row_sel = pw_cfg["rows_selector"]
-    ready_sel = f"{section_sel} {row_sel}".strip()
-    page.wait_for_selector(ready_sel, timeout=int(pw_cfg.get("ready_timeout_ms", 30000)))
-    scope: Any = page
-    if section_sel:
-        sections = page.query_selector_all(section_sel)
-        if sections:
-            scope = sections[0]
-    return parse_leaderboard(scope.query_selector_all(row_sel))
+    page.wait_for_selector(row_sel, timeout=int(pw_cfg.get("ready_timeout_ms", 30000)))
+    rows = page.query_selector_all(row_sel)
+    return parse_leaderboard(
+        rows,
+        int(page_cfg.get("score_column", 4)),
+        str(page_cfg.get("score_type", "absolute")),
+        str(page_cfg.get("domain", "")),
+    )
 
 
 class Fetcher(BaseFetcher):
@@ -87,6 +103,9 @@ class Fetcher(BaseFetcher):
         from camoufox.sync_api import Camoufox  # 延迟导入：camoufox 为可选依赖
 
         pw_cfg = self.cfg["playwright"]
+        pages_cfg = pw_cfg.get("pages") or []
+        if not pages_cfg:
+            raise ConfigError("LMArena 未配置采集页面（playwright.pages）")
         fp = pw_cfg.get("fingerprint_browser") or {}
         goto_timeout = int(pw_cfg.get("goto_timeout_ms", 60000))
         try:
@@ -96,9 +115,23 @@ class Fetcher(BaseFetcher):
                 **proxy_kwargs(self.cfg),
             ) as browser:
                 page = browser.new_page()
-                # LMArena 有长连接，networkidle 永不满足；DOM ready 后等榜单行出现即可
-                page.goto(pw_cfg["url"], wait_until="domcontentloaded", timeout=goto_timeout)
-                return collect_rows(page, pw_cfg)
+                records: list[dict] = []
+                failures: list[str] = []
+                for page_cfg in pages_cfg:
+                    domain = str(page_cfg.get("domain", ""))
+                    try:
+                        # LMArena 有长连接，networkidle 永不满足；DOM ready 后等榜单行出现即可
+                        page.goto(
+                            page_cfg["url"],
+                            wait_until="domcontentloaded",
+                            timeout=goto_timeout,
+                        )
+                        records.extend(collect_rows(page, pw_cfg, page_cfg))
+                    except Exception as exc:  # noqa: BLE001 - 单领域失败不丢弃其它领域数据
+                        failures.append(f"{domain or page_cfg['url']}: {type(exc).__name__}")
+                if not records and failures:
+                    raise FetchFailed("LMArena 页面访问失败: " + "; ".join(failures))
+                return records
         except Exception as exc:
             if isinstance(exc, (ConfigError, FetchFailed)):
                 raise

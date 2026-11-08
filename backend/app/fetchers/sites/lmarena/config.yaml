@@ -1,34 +1,55 @@
-# LMArena Chatbot Arena 人类偏好榜单：公开页面 + Cloudflare 强风控，Camoufox 指纹浏览器
+# LMArena (arena.ai) 人类偏好榜单：公开页面 + Cloudflare 强风控，Camoufox 指纹浏览器
 # 指纹浏览器仅用于公开页强风控场景（指南 M06.2 边界），不绕过登录/付费墙/验证码
+#
+# 站点只有一个，覆盖五个领域（chat/agent/code/image/video）：一次任务遍历各领域页面，
+# 每条记录带自己的 domain。Elo/百分比量纲与 0–100 指数不可比，故只写维度分
+# （维度名=领域），主榜分仍由 Artificial Analysis 等 0–100 量纲来源提供。
 key: lmarena
 label: LMArena
-domain: chat # 人类偏好信号独立 domain，避免与 artificial_analysis 的 general 业务键互相覆盖
 data_type: model_metrics
-description: 人类盲测偏好榜（Chatbot Arena），分数来自真实用户两两对战的胜率，反映对话体验；公开页面有 Cloudflare 风控，需低频采集。
-homepage: https://lmarena.ai/leaderboard
+description: 人类盲测偏好榜，分数来自真实用户两两对战的胜率/得分，覆盖对话、智能体、代码、图像、视频五大领域；公开页面有 Cloudflare 风控，需低频采集。
+homepage: https://arena.ai/leaderboard
 auth_required: false
 strategies: [playwright]
 rate_limit_per_min: 2
 compliance:
   public_only: true
   notes: 仅解析公开榜单页，低频访问，遵守站点条款；遇 reCAPTCHA/hCaptcha 一律转人工或停用
+# 来源键按领域区分（lmarena_chat 等），避免同源条目在合并时互相覆盖
+source_key_template: "{key}_{domain}"
 playwright:
-  url: https://lmarena.ai/leaderboard
-  # 新站为 Next.js SSR 渲染（非 table、无数据 XHR）：榜单行为 figure 内含 span[title] 的容器
-  # 页面有多个 figure 区块（首个为主榜单，其余为次要榜单/隐藏副本），只解析首区块
-  section_selector: 'div[role="figure"]'
-  rows_selector: 'div:has(> span[title])'
-  # proxy: 缺省走 MERA_FETCH_PROXY 环境变量（默认 http://127.0.0.1:6789）；
-  # 支持 env:VAR 引用或直连地址，空字符串/none 禁用（Cloudflare 按 IP 封禁，机房出口基本必须代理）
+  # 公共采集参数；各领域页面 URL / 分数列见 pages
+  rows_selector: "table.table-fixed tbody tr"
+  ready_timeout_ms: 30000
   goto_timeout_ms: 60000 # domcontentloaded（长连接页面不能用 networkidle）
-  ready_timeout_ms: 30000 # 等榜单行出现的上限
   fingerprint_browser:
     enabled: true
     provider: camoufox
     geoip: true # 走代理时按出口 IP 伪装时区/语言（camoufox[geoip]）
+  pages:
+    - domain: chat
+      url: https://arena.ai/leaderboard/chat/text
+      score_column: 4
+      score_type: absolute
+    - domain: agent
+      url: https://arena.ai/leaderboard/agent
+      score_column: 3
+      score_type: percent
+    - domain: code
+      url: https://arena.ai/leaderboard/code/webdev
+      score_column: 4
+      score_type: absolute
+    - domain: image
+      url: https://arena.ai/leaderboard/image/text-to-image
+      score_column: 4
+      score_type: absolute
+    - domain: video
+      url: https://arena.ai/leaderboard/video/text-to-video
+      score_column: 4
+      score_type: absolute
 normalize:
-  defaults:
-    provider: lmarena # vendor 缺失时回落站点名
+  # 分数量纲不可比：score 只记到 scores[domain]，不作为跨源主榜分
+  score_as_dimension: true
   fields:
     model_id: model
     provider: vendor

@@ -70,11 +70,11 @@ def discover_sites(sites_dir: str | Path = SITES_DIR) -> list[str]:
     root = Path(sites_dir)
     if not root.is_dir():
         return []
-    return sorted(
+    return [
         child.name
-        for child in root.iterdir()
+        for child in sorted(root.iterdir())
         if child.is_dir() and (child / "config.yaml").is_file()
-    )
+    ]
 
 
 def load_site(sites_dir: str | Path, key: str) -> SiteConfig:
@@ -106,12 +106,7 @@ def read_site_cfg(sites_dir: str | Path, key: str) -> dict[str, Any]:
     config_path = Path(sites_dir) / key / "config.yaml"
     if not config_path.is_file():
         raise ConfigError(f"站点配置不存在: {key}")
-    try:
-        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"站点配置 YAML 解析失败: {key}") from exc
-    if not isinstance(cfg, dict):
-        raise ConfigError(f"站点配置必须是映射结构: {key}")
+    cfg = _load_yaml(config_path)
     _validate_config(cfg, key)
     return cfg
 
@@ -128,25 +123,20 @@ def list_sites(sites_dir: str | Path) -> list[SiteMeta]:
     if not root.is_dir():
         return []
     sites: list[SiteMeta] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("_") or entry.name.startswith("."):
-            continue
-        config_path = entry / "config.yaml"
-        if not config_path.is_file():
-            continue
+    for key in discover_sites(root):
         try:
-            cfg = read_site_cfg(root, entry.name)
+            cfg = read_site_cfg(root, key)
         except ConfigError:
             # 配置非法的站点在列表中直接跳过（不影响其它站点）
             continue
-        label = _clean_str(cfg.get("label")) or entry.name.replace("_", " ").title()
+        label = _clean_str(cfg.get("label")) or key.replace("_", " ").title()
         sites.append(
             SiteMeta(
-                key=entry.name,
+                key=key,
                 label=label,
                 domain=cfg.get("domain"),
                 data_type=cfg["data_type"],
-                data_types=_resolve_data_types(cfg, entry.name),
+                data_types=_resolve_data_types(cfg, key),
                 description=_clean_str(cfg.get("description")),
                 homepage=_clean_str(cfg.get("homepage")),
             )
@@ -171,11 +161,22 @@ def _resolve_data_types(cfg: dict, key: str) -> tuple[str, ...]:
     return tuple(declared)
 
 
+def _load_yaml(config_path: Path) -> dict[str, Any]:
+    """读取并解析单个站点 config.yaml，不做业务校验。"""
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"站点配置 YAML 解析失败: {config_path.parent.name}") from exc
+    if not isinstance(cfg, dict):
+        raise ConfigError(f"站点配置必须是映射结构: {config_path.parent.name}")
+    return cfg
+
+
 def _validate_config(cfg: dict, key: str) -> None:
     if not isinstance(cfg.get("key"), str) or not cfg["key"].strip():
         raise ConfigError(f"站点 {key} 配置缺 key")
     if cfg["key"] != key:
-        raise ConfigError(f"站点 {key} 配置 key 与目录名不一致: {cfg['key']!r}")
+        raise ConfigError(f"站点 {key} 配置 key 与请求 key 不一致: {cfg['key']!r}")
     if cfg.get("data_type") not in DATA_TYPES:
         raise ConfigError(f"站点 {key} 数据类型非法: {cfg.get('data_type')!r}")
     if cfg.get("auth_required", None) not in AUTH_REQUIRED_VALUES:
