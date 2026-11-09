@@ -47,12 +47,12 @@ class TestSiteDirectory:
     def test_lmarena_covers_all_five_domains(self):
         site = load_site(SITES_DIR, "lmarena")
         pages = site.cfg["playwright"]["pages"]
-        assert [page["domain"] for page in pages] == [
-            "chat",
-            "agent",
-            "code",
-            "image",
-            "video",
-        ]
+        # 五个领域共 14 个子分类
+        assert [page["domain"] for page in pages] == (
+            ["chat"] * 4 + ["agent"] * 2 + ["code"] * 2 + ["image"] * 3 + ["video"] * 3
+        )
+        assert site.cfg["domains"] == ["chat", "agent", "code", "image", "video"]
         # Elo/百分比量纲只写维度分，不参与跨源主榜分
         assert site.cfg["normalize"]["score_as_dimension"] is True
+        assert site.cfg["normalize"]["primary_sub"]["chat"] == "text"
+        assert site.cfg["normalize"]["provider_fallback"] == "unknown"

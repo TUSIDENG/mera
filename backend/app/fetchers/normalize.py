@@ -44,7 +44,7 @@ _SEP_RE = re.compile(r"[\s_]+")
 
 # 各数据类型参与映射的标准字段（未在 fields 声明时按同名恒等取值）
 _STANDARD_FIELDS: dict[str, tuple[str, ...]] = {
-    "model_metrics": ("model_id", "provider", "score", "domain"),
+    "model_metrics": ("model_id", "provider", "score", "domain", "sub"),
     "infrastructure_cost": ("cost_type", "name", "unit", "price", "region", "is_active"),
     "subscription_plan": (
         "provider",
@@ -180,13 +180,20 @@ def _normalize_item(
     return _build_plan(values, data, cfg)
 
 
-def _source_key(cfg: dict, domain: str) -> str:
-    """来源键：默认站点 key；声明 source_key_template 时按领域展开（如 lmarena_chat）。"""
+def _source_key(cfg: dict, domain: str, sub: str = "") -> str:
+    """来源键：默认站点 key；声明 source_key_template 时按领域/子分类展开。
+
+    支持占位符 {key} / {domain} / {sub}；sub 缺失时回落到 domain。
+    """
     key = _clean_str(cfg.get("key")) or ""
     template = _clean_str(cfg.get("source_key_template"))
     if not template:
         return key
-    return template.replace("{key}", key).replace("{domain}", domain)
+    return (
+        template.replace("{key}", key)
+        .replace("{domain}", domain)
+        .replace("{sub}", sub or domain)
+    )
 
 
 def _build_snapshot(
@@ -198,12 +205,15 @@ def _build_snapshot(
 ) -> SnapshotRecord | None:
     raw_model_id = _clean_str(values.get("model_id"))
     model_id = canonical_model_name(raw_model_id)
-    # 厂商取值：模型 id 的 vendor 前缀（真实研发厂商）-> 记录自带 provider -> 站点 key 兜底；
-    # 聚合平台（如 openrouter）不允许兜底成榜单厂商，其 config 不得声明 defaults.provider。
+    # 厂商取值：模型 id 的 vendor 前缀（真实研发厂商）-> 记录自带 provider ->
+    # 站点声明的 provider_fallback -> 站点 key 兜底。
+    # 聚合平台（如 openrouter）不允许兜底成榜单厂商，其 config 不得声明 defaults.provider；
+    # 榜单站点不是厂商（如 lmarena），用 provider_fallback 标记 unknown。
     # 统一小写避免同一厂商多写法（OpenAI/openai）各占一行
     provider = (
         vendor_prefix(raw_model_id)
         or _clean_str(values.get("provider"))
+        or _clean_str((cfg.get("normalize") or {}).get("provider_fallback"))
         or _clean_str(cfg.get("key"))
     )
     provider = provider.lower() if provider else None
@@ -219,21 +229,28 @@ def _build_snapshot(
     raw_score = values.get("score")
     score = parse_score(raw_score)
     score_source: str | None = None
-    # 领域：记录自带（同站多领域）优先，其次站点配置，最后 general
+    # 领域/子分类：记录自带（同站多领域）优先，其次站点配置，最后 general
     domain = _clean_str(values.get("domain")) or _clean_str(cfg.get("domain")) or "general"
+    sub = _clean_str(values.get("sub"))
+    normalize_cfg = cfg.get("normalize") or {}
     # 量纲不可比的来源（如 LMArena Elo/百分比）只记维度分，不参与跨源主榜分
-    score_as_dimension = bool((cfg.get("normalize") or {}).get("score_as_dimension"))
-    # 采集数据包一层 sources：记录该来源所属榜单域、评测的具体变体与原始记录，
+    score_as_dimension = bool(normalize_cfg.get("score_as_dimension"))
+    # 一个领域有多个子分类时，仅主榜子分类写该领域维度分，其余只留来源明细
+    primary_sub = normalize_cfg.get("primary_sub") or {}
+    dim_name = domain if not sub or primary_sub.get(domain) == sub else None
+    # 采集数据包一层 sources：记录该来源所属榜单域/子分类与原始记录，
     # 多来源/多域在仓储层按 model_id 合并到同一行
-    source_key = _source_key(cfg, domain)
+    source_key = _source_key(cfg, domain, sub)
     source_entry: dict[str, Any] = {
         "raw_model_id": raw_model_id,
         "domain": domain,
         "record": item,
     }
+    if sub:
+        source_entry["sub"] = sub
     if score_as_dimension:
-        if score is not None:
-            scores[domain] = float(score)
+        if score is not None and dim_name:
+            scores[dim_name] = float(score)
         score = None
     elif score is not None:
         score_source = "score"

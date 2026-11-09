@@ -42,6 +42,8 @@ class BaseFetcher(ABC):
         self.truncated = False
         # is_available() 为 False 时的可读原因（不得包含密钥值）
         self.unavailable_reason: str | None = None
+        # 任务指定的领域（None/空表示全量）；多领域站点据此过滤要采集的子页面
+        self.domain: str | None = None
 
     def is_available(self) -> bool:
         """前置检查：依赖、密钥、会话/浏览器 profile 是否就绪。默认就绪。"""

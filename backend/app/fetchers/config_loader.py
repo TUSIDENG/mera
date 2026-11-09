@@ -44,6 +44,8 @@ class SiteMeta:
     # 站点说明与官网地址（可选，供前端展示来源背景）
     description: str | None = None
     homepage: str | None = None
+    # 站点覆盖的领域列表（前端「领域」下拉）；为空表示不区分领域
+    domains: tuple[str, ...] = ()
 
 
 @dataclass
@@ -139,6 +141,9 @@ def list_sites(sites_dir: str | Path) -> list[SiteMeta]:
                 data_types=_resolve_data_types(cfg, key),
                 description=_clean_str(cfg.get("description")),
                 homepage=_clean_str(cfg.get("homepage")),
+                domains=tuple(
+                    str(item).strip() for item in (cfg.get("domains") or []) if str(item).strip()
+                ),
             )
         )
     return sites

@@ -28,6 +28,7 @@ def list_collection_sites(
             key=site.key,
             label=site.label,
             domain=site.domain,
+            domains=list(site.domains),
             data_type=site.data_type,
             data_types=list(site.data_types),
             description=site.description,

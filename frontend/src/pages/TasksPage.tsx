@@ -5,6 +5,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import {
   createFetchTask,
+  DOMAIN_LABELS,
   fetchTaskFormSchema,
   listFetchTaskRecords,
   listFetchTasks,
@@ -39,6 +40,9 @@ import {
 import { formatTime } from '../lib/utils'
 
 const POLL_INTERVAL_MS = 10_000
+
+/** 多领域站点的「全部领域」哨兵值（提交时转为 undefined，后端按全量采集） */
+const ALL_DOMAINS = '__all__'
 
 /** 任务状态徽标配色（与后端状态机取值一致） */
 const STATUS_STYLES: Record<string, { label: string; className: string }> = {
@@ -141,7 +145,9 @@ export default function TasksPage() {
   const selectedSite = sites.find((s) => s.key === sourceKey)
   useEffect(() => {
     if (!selectedSite) return
-    form.setValue('domain', selectedSite.domain ?? '')
+    // 多领域站点默认采集全部领域，由用户在下拉里收窄
+    const multipleDomains = (selectedSite.domains?.length ?? 0) > 1
+    form.setValue('domain', multipleDomains ? '' : (selectedSite.domain ?? ''))
     const currentType = form.getValues('task_type') as TaskType
     if (!selectedSite.data_types.includes(currentType)) {
       const fallback =
@@ -232,7 +238,32 @@ export default function TasksPage() {
 
             <div className="w-36 space-y-1.5">
               <Label htmlFor="domain">领域</Label>
-              <Input id="domain" readOnly placeholder="随站点联动" {...form.register('domain')} />
+              {(selectedSite?.domains?.length ?? 0) > 1 ? (
+                <Controller
+                  control={form.control}
+                  name="domain"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || ALL_DOMAINS}
+                      onValueChange={(v) => field.onChange(v === ALL_DOMAINS ? '' : v)}
+                    >
+                      <SelectTrigger id="domain">
+                        <SelectValue placeholder="全部领域" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_DOMAINS}>全部领域</SelectItem>
+                        {(selectedSite?.domains ?? []).map((d) => (
+                          <SelectItem key={d} value={d}>
+                            {DOMAIN_LABELS[d] ?? d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              ) : (
+                <Input id="domain" readOnly placeholder="随站点联动" {...form.register('domain')} />
+              )}
             </div>
 
             <div className="w-44 space-y-1.5">

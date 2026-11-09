@@ -119,6 +119,8 @@ def run_fetch(
                 _log_skip_once(name, fetcher.unavailable_reason or "依赖/密钥/会话未就绪")
                 continue
             try:
+                # 任务可指定领域（多领域站点据此只采该领域子页面；空表示全量）
+                fetcher.domain = getattr(task, "domain", None)
                 raw = fetcher.fetch()
             except CaptchaRequired:
                 task.mark_captcha_pending()
@@ -219,6 +221,11 @@ class RepoTaskHandle:
     def task_type(self) -> str | None:
         task = self._repo.get_task(self._task_id)
         return task.task_type if task is not None else None
+
+    @property
+    def domain(self) -> str | None:
+        task = self._repo.get_task(self._task_id)
+        return getattr(task, "domain", None) if task is not None else None
 
     def mark_running(self) -> None:
         self._repo.mark_running(self._task_id)

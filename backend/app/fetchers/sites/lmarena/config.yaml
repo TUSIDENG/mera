@@ -1,55 +1,93 @@
 # LMArena (arena.ai) 人类偏好榜单：公开页面 + Cloudflare 强风控，Camoufox 指纹浏览器
 # 指纹浏览器仅用于公开页强风控场景（指南 M06.2 边界），不绕过登录/付费墙/验证码
 #
-# 站点只有一个，覆盖五个领域（chat/agent/code/image/video）：一次任务遍历各领域页面，
-# 每条记录带自己的 domain。Elo/百分比量纲与 0–100 指数不可比，故只写维度分
-# （维度名=领域），主榜分仍由 Artificial Analysis 等 0–100 量纲来源提供。
+# 站点只有一个，下分五个领域、共 14 个子分类榜单。一次任务可全量采集，
+# 也可按任务领域只采某个领域（chat 则只采 text/search/vision/document 四页）。
+# Elo/百分比量纲与 0–100 指数不可比，故每个领域只用主榜（primary_sub）写维度分，
+# 其余子分类分数保留在 data.sources[lmarena_<sub>] 里供后续分析；主榜分仍由
+# Artificial Analysis 等 0–100 量纲来源提供。
 key: lmarena
 label: LMArena
 data_type: model_metrics
-description: 人类盲测偏好榜，分数来自真实用户两两对战的胜率/得分，覆盖对话、智能体、代码、图像、视频五大领域；公开页面有 Cloudflare 风控，需低频采集。
+description: 人类盲测偏好榜，分数来自真实用户两两对战的胜率/得分，覆盖对话、智能体、代码、图像、视频五大领域共 14 个子分类；公开页面有 Cloudflare 风控，需低频采集。
 homepage: https://arena.ai/leaderboard
 auth_required: false
 strategies: [playwright]
 rate_limit_per_min: 2
+# 前端「领域」下拉选项；任务未指定领域时采集全部
+domains: [chat, agent, code, image, video]
 compliance:
   public_only: true
   notes: 仅解析公开榜单页，低频访问，遵守站点条款；遇 reCAPTCHA/hCaptcha 一律转人工或停用
-# 来源键按领域区分（lmarena_chat 等），避免同源条目在合并时互相覆盖
-source_key_template: "{key}_{domain}"
+# 来源键按子分类区分（lmarena_text 等），避免同源条目在合并时互相覆盖
+source_key_template: "{key}_{sub}"
 playwright:
-  # 公共采集参数；各领域页面 URL / 分数列见 pages
   rows_selector: "table.table-fixed tbody tr"
-  ready_timeout_ms: 30000
+  # 表头驱动列映射：各领域/子分类列数不同（如 agent 13 列、image 5 列），
+  # 按表头名定位 Rank/Model/Score/Votes/Cost/Price/Context，其余列原样保留
+  header_selector: "table.table-fixed thead th"
+  ready_timeout_ms: 45000
   goto_timeout_ms: 60000 # domcontentloaded（长连接页面不能用 networkidle）
+  settle_ms: 800 # 榜单行离屏渲染，等 DOM 稳定后一次性取全量行
   fingerprint_browser:
     enabled: true
     provider: camoufox
     geoip: true # 走代理时按出口 IP 伪装时区/语言（camoufox[geoip]）
   pages:
     - domain: chat
+      sub: text
       url: https://arena.ai/leaderboard/chat/text
-      score_column: 4
-      score_type: absolute
+    - domain: chat
+      sub: search
+      url: https://arena.ai/leaderboard/chat/search
+    - domain: chat
+      sub: vision
+      url: https://arena.ai/leaderboard/chat/vision
+    - domain: chat
+      sub: document
+      url: https://arena.ai/leaderboard/chat/document
     - domain: agent
+      sub: capabilities
       url: https://arena.ai/leaderboard/agent
-      score_column: 3
-      score_type: percent
+    - domain: agent
+      sub: alignment
+      url: https://arena.ai/leaderboard/agent/alignment
     - domain: code
+      sub: webdev
       url: https://arena.ai/leaderboard/code/webdev
-      score_column: 4
-      score_type: absolute
+    - domain: code
+      sub: image-to-webdev
+      url: https://arena.ai/leaderboard/code/image-to-webdev
     - domain: image
+      sub: text-to-image
       url: https://arena.ai/leaderboard/image/text-to-image
-      score_column: 4
-      score_type: absolute
+    - domain: image
+      sub: single-image-edit
+      url: https://arena.ai/leaderboard/image/image-edit/single-image
+    - domain: image
+      sub: multi-image-edit
+      url: https://arena.ai/leaderboard/image/image-edit/multi-image
     - domain: video
+      sub: text-to-video
       url: https://arena.ai/leaderboard/video/text-to-video
-      score_column: 4
-      score_type: absolute
+    - domain: video
+      sub: image-to-video
+      url: https://arena.ai/leaderboard/video/image-to-video
+    - domain: video
+      sub: video-edit
+      url: https://arena.ai/leaderboard/video/video-edit
 normalize:
   # 分数量纲不可比：score 只记到 scores[domain]，不作为跨源主榜分
   score_as_dimension: true
+  # 每个领域用哪个子分类作为该领域维度分（其余子分类只留来源明细）
+  primary_sub:
+    chat: text
+    agent: capabilities
+    code: webdev
+    image: text-to-image
+    video: text-to-video
+  # 站点不是厂商：vendor 缺失时不回落 lmarena，标记 unknown，避免榜单名混进厂商列
+  provider_fallback: unknown
   fields:
     model_id: model
     provider: vendor

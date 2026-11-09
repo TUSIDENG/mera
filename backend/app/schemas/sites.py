@@ -9,6 +9,8 @@ class SiteOut(BaseModel):
     key: str
     label: str
     domain: str | None
+    # 站点覆盖的领域列表（前端「领域」下拉）；为空表示不区分领域
+    domains: list[str] = []
     data_type: str
     data_types: list[str]
     # 站点说明与官网地址（可选）

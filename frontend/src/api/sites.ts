@@ -5,6 +5,8 @@ export interface CollectionSite {
   key: string
   label: string
   domain: string | null
+  /** 站点覆盖的领域列表（多领域站点前端渲染领域下拉）；为空表示不区分领域 */
+  domains: string[]
   data_type: string
   /** 该站点支持的任务类型（前端据此过滤 task_type 选项） */
   data_types: string[]
