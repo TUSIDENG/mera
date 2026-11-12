@@ -1,4 +1,4 @@
-﻿"""LangGraph 离线打分管线：load -> prompt -> parse -> persist。
+"""LangGraph 离线打分管线：load -> prompt -> parse -> persist。
 
 - load：读取快照当前态（data.sources 各平台采集数据 + 采集维度原始分）
 - prompt：组装 rubric 提示词，LLM structured output 产出 ScoreResult

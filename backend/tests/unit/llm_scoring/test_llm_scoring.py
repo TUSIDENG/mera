@@ -1,4 +1,4 @@
-﻿"""LLM 离线打分管线单测：mock chat 模型，不触网。"""
+"""LLM 离线打分管线单测：mock chat 模型，不触网。"""
 
 from __future__ import annotations
 
