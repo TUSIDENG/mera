@@ -45,7 +45,9 @@ class FetchTaskControl(Protocol):
     def bump_attempt(self) -> None: ...
     def mark_retry_pending(self, error_message: str | None = None) -> None: ...
     def mark_succeeded(self, *, strategy: str, hit_count: int) -> None: ...
-    def mark_partial_succeeded(self, *, strategy: str, hit_count: int) -> None: ...
+    def mark_partial_succeeded(
+        self, *, strategy: str, hit_count: int, error_message: str | None = None
+    ) -> None: ...
     def mark_failed_exhausted(self, error_message: str | None = None) -> None: ...
     def mark_captcha_pending(self) -> None: ...
     def log_skip(self, strategy: str, reason: str) -> None: ...
@@ -113,6 +115,7 @@ def run_fetch(
 
         records: list[Any] = []
         hit_name: str | None = None
+        hit_fetcher: BaseFetcher | None = None
         truncated = False
         for name, fetcher in pairs:
             if not is_strategy_available(fetcher):
@@ -137,7 +140,7 @@ def run_fetch(
                 continue
             found, truncated = fetcher.normalize(raw, data_type=task_type)
             if found:
-                records, hit_name = found, name
+                records, hit_name, hit_fetcher = found, name, fetcher
                 break
             task.log_empty(name)  # normalize 空结果视为未命中，继续降级
 
@@ -156,11 +159,20 @@ def run_fetch(
             min_hits=min_hits,
         )
         strategy_label = f"{site_key}/{hit_name}" if hit_name else None
+        # 部分子页面失败等非致命问题：写进任务日志，partial 时同时落到 error_message
+        warnings = list(getattr(hit_fetcher, "warnings", ())) if hit_fetcher else []
+        if warnings and hit_name:
+            task.log_failure(hit_name, "; ".join(warnings))
+        warn_message = "; ".join(warnings) or None
 
         if status == Status.SUCCEEDED:
             task.mark_succeeded(strategy=strategy_label or "", hit_count=hit_count)
         elif status == Status.PARTIAL_SUCCEEDED:
-            task.mark_partial_succeeded(strategy=strategy_label or "", hit_count=hit_count)
+            task.mark_partial_succeeded(
+                strategy=strategy_label or "",
+                hit_count=hit_count,
+                error_message=warn_message or last_error,
+            )
         elif status == Status.FAILED_EXHAUSTED:
             task.mark_failed_exhausted(error_message=last_error)
         else:  # PENDING：指数退避后重试

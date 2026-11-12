@@ -119,6 +119,16 @@ def site_data_types(sites_dir: str | Path, key: str) -> tuple[str, ...]:
     return _resolve_data_types(cfg, key)
 
 
+def site_strategies(sites_dir: str | Path, key: str) -> tuple[str, ...]:
+    """站点声明的采集策略（按声明顺序，首项为默认策略）。
+
+    用于触发任务未显式指定 fetch_strategy 时按站点能力选队列，
+    避免浏览器类站点被投进 default 队列、落到无浏览器环境的 worker。
+    """
+    cfg = read_site_cfg(sites_dir, key)
+    return tuple(str(item) for item in cfg["strategies"])
+
+
 def list_sites(sites_dir: str | Path) -> list[SiteMeta]:
     """枚举 sites 目录下所有合法站点的元数据，按 key 排序。"""
     root = Path(sites_dir)

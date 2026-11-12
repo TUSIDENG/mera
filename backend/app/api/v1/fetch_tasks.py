@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.depends import get_current_identity, get_enqueuer, get_repository
 from app.core.exceptions import AppError, ConfigError
 from app.core.security import Identity
-from app.fetchers.config_loader import SITES_DIR, site_data_types
+from app.fetchers.config_loader import SITES_DIR, site_data_types, site_strategies
 from app.repositories.dto import CreateTaskParams
 from app.repositories.repository import Repository
 from app.schemas.common import Page, PageParams
@@ -44,6 +44,9 @@ def create_fetch_task(
             code="invalid_task_type",
             status_code=422,
         )
+    # 未显式指定策略时按站点声明的首个策略入队，避免浏览器类站点落进
+    # default 队列被无浏览器环境的 worker 抢走
+    strategy = body.fetch_strategy or site_strategies(SITES_DIR, body.source_key)[0]
     task = repo.create_task(
         CreateTaskParams(
             task_type=body.task_type,
@@ -51,10 +54,10 @@ def create_fetch_task(
             domain=body.domain,
             triggered_by=identity.user_id,
             auto_start=True,
-            data={"fetch_strategy": body.fetch_strategy} if body.fetch_strategy else {},
+            data={"fetch_strategy": strategy},
         )
     )
-    enqueuer.enqueue(task.id, strategy=body.fetch_strategy)
+    enqueuer.enqueue(task.id, strategy=strategy)
     return FetchTaskOut.model_validate(task)
 
 

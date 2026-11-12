@@ -25,8 +25,22 @@ x-backend-env: &backend-env
   CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:-}
   CASDOOR_ISSUER: http://localhost:8000
   INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
-  # 采集代理（M06）：容器内访问宿主机本机代理客户端；站点 config.yaml playwright.proxy 可覆盖
+  # 系统级 HTTP(S) 代理：容器内所有流量先经宿主机 Clash 出口（日本节点）
+  HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:6789}
+  HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:6789}
+  http_proxy: ${http_proxy:-http://host.docker.internal:6789}
+  https_proxy: ${https_proxy:-http://host.docker.internal:6789}
+  # 本地服务走直连（不走 Clash）
+  NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,casdoor}
+  no_proxy: ${no_proxy:-localhost,127.0.0.1,postgres,redis,casdoor}
+  # 采集代理（M06）：默认指向本地中继（需先启动 1024proxy 链式中继脚本），
+  # 未启动时自动回落为 Clash 直连（经 Japan 出口）
   MERA_FETCH_PROXY: ${MERA_FETCH_PROXY:-http://host.docker.internal:6789}
+  # 中继是否经 Clash 中转（hop1）。服务器部署在日本/新加坡且 IP 已加入
+  # 1024proxy 白名单时设为 0，中继将直连 1024proxy endpoint
+  MERA_RELAY_HOP1: ${MERA_RELAY_HOP1:-1}
+  MERA_RELAY_CLASH_HOST: ${MERA_RELAY_CLASH_HOST:-host.docker.internal}
+  MERA_RELAY_CLASH_PORT: ${MERA_RELAY_CLASH_PORT:-6789}
   FRONTEND_URL: http://localhost:3000
   MAX_FETCH_ATTEMPTS: "3"
   # LLM 离线打分（app/scoring）：开关 + 打分模型提供方与各家 key（无 key 视为关闭）
@@ -174,22 +188,20 @@ services:
     environment:
       <<: *backend-env
       CELERY_QUEUES: "default,fetch_browser"
+      # 浏览器采集走容器内中继（Clash → 1024proxy 住宅出口），而非直连 Clash
+      MERA_FETCH_PROXY: ${MERA_FETCH_PROXY:-http://127.0.0.1:9999}
     depends_on:
       - backend-app
     command:
-      - celery
-      - -A
-      - app.worker.celery_app
-      - worker
-      - -Q
-      - default,fetch_browser
-      - -n
-      - worker-browser@%h
-      - --concurrency=2
-      - -l
-      - INFO
+      - sh
+      - -c
+      - |
+        python3 /app/proxy_chain_relay.py --port 9999 > /tmp/relay.log 2>&1 &
+        exec celery -A app.worker.celery_app worker -Q default,fetch_browser -n worker-browser@%h --concurrency=2 -l INFO
     volumes:
       - ./backend/app/fetchers/sites:/app/app/fetchers/sites:ro
+      # 采集中继脚本：容器重建后仍在，启动 relay 直接用 /app/proxy_chain_relay.py
+      - ./backend/tools/proxy_chain_relay.py:/app/proxy_chain_relay.py:ro
       # 浏览器登录态/Camoufox profile 命名卷（M06.2）：只读挂载，登录脚本经临时容器可写刷新
       - browser_profiles:/var/mera/profiles:ro
     networks: [mera-net]

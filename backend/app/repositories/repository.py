@@ -600,6 +600,7 @@ class Repository:
         *,
         strategy: str,
         hit_count: int,
+        error_message: str | None = None,
     ) -> FetchTask:
         task = self._require_task(task_id)
         ensure_terminal_rules(
@@ -613,6 +614,7 @@ class Repository:
             FetchTaskStatus.PARTIAL_SUCCEEDED.value,
             strategy=strategy,
             hit_count=hit_count,
+            error_message=error_message,
         )
 
     def mark_failed_exhausted(

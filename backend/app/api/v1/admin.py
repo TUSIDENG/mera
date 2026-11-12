@@ -11,6 +11,7 @@ from app.api.depends import get_enqueuer, get_repository, require_admin
 from app.core.exceptions import AppError, InvalidTransition, NotFoundError
 from app.core.security import Identity
 from app.db.enums import FetchTaskStatus, SubscriptionSource
+from app.fetchers.config_loader import SITES_DIR, site_strategies
 from app.fetchers.normalize import canonical_model_name
 from app.repositories.dto import (
     ApiPriceRecord,
@@ -211,6 +212,8 @@ def admin_retrigger_task(
     if task.status != FetchTaskStatus.FAILED_EXHAUSTED.value:
         raise InvalidTransition(f"仅 failed_exhausted 任务可重触发（当前 {task.status}）")
 
+    # 原任务未记录策略时按站点声明补齐，保证重触发仍进对应队列
+    strategy = task.fetch_strategy or site_strategies(SITES_DIR, task.source_key)[0]
     new_task = repo.create_task(
         CreateTaskParams(
             task_type=task.task_type,
@@ -220,9 +223,9 @@ def admin_retrigger_task(
             auto_start=True,
             data={
                 "retrigger_of": str(task_id),
-                "fetch_strategy": task.fetch_strategy,
+                "fetch_strategy": strategy,
             },
         )
     )
-    enqueuer.enqueue(new_task.id, strategy=task.fetch_strategy)
+    enqueuer.enqueue(new_task.id, strategy=strategy)
     return FetchTaskOut.model_validate(new_task)

@@ -41,6 +41,8 @@ _VARIANT_SUFFIX_RE = re.compile(r":[a-z][a-z0-9-]*$")  # 冒号变体后缀（:b
 # 推理档位括号：(high)/(max)/(xhigh)/(high with fallback)/(high, default fallback) 等
 _EFFORT_PARENS_RE = re.compile(r"\((?:high|medium|low|minimal|max|xhigh)\b[^)]*\)$")
 _SEP_RE = re.compile(r"[\s_]+")
+# model_snapshots.provider / pricing.provider 的列宽上限（varchar(50)）
+_PROVIDER_MAX_LEN = 50
 
 # 各数据类型参与映射的标准字段（未在 fields 声明时按同名恒等取值）
 _STANDARD_FIELDS: dict[str, tuple[str, ...]] = {
@@ -217,6 +219,14 @@ def _build_snapshot(
         or _clean_str(cfg.get("key"))
     )
     provider = provider.lower() if provider else None
+    # 列宽约束：provider 是 varchar(50)，解析异常（模型名被拼进厂商）会撑爆插入，
+    # 超长值回退到站点兜底，避免一条脏记录让整批 UPSERT 回滚
+    if provider and len(provider) > _PROVIDER_MAX_LEN:
+        provider = (
+            _clean_str((cfg.get("normalize") or {}).get("provider_fallback"))
+            or _clean_str(cfg.get("key"))
+        )
+        provider = provider.lower() if provider else None
     if not model_id or not provider:
         return None
 

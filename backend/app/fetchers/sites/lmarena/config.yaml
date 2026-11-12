@@ -23,6 +23,15 @@ compliance:
 source_key_template: "{key}_{sub}"
 playwright:
   rows_selector: "table.table-fixed tbody tr"
+  # 直接深链访问排行榜易被 Cloudflare 挑战；先访问站点根域建立 __cf_bm cookie
+  warmup_url: "https://arena.ai/"
+  warmup_wait_ms: 3000
+  # 挑战页的 JS 校验需 5–20 秒才放行，轮询等待这么久再判定真被拦住
+  block_resolve_ms: 20000
+  # 单个子分类页被挑战时的重试次数（每次重试前换 IP 并回根域重拿 cookie）
+  page_attempts: 3
+  # 被挑战时请求本地中继换出口 IP（中继控制接口，直连不走代理）
+  relay_rotate_url: "http://127.0.0.1:9999/__rotate"
   # 表头驱动列映射：各领域/子分类列数不同（如 agent 13 列、image 5 列），
   # 按表头名定位 Rank/Model/Score/Votes/Cost/Price/Context，其余列原样保留
   header_selector: "table.table-fixed thead th"
@@ -32,7 +41,7 @@ playwright:
   fingerprint_browser:
     enabled: true
     provider: camoufox
-    geoip: true # 走代理时按出口 IP 伪装时区/语言（camoufox[geoip]）
+    geoip: true # 走代理时按出口 IP 伪装时区/语言/地理位置；换 IP 会重启浏览器重新绑定
   pages:
     - domain: chat
       sub: text

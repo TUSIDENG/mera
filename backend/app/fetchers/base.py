@@ -40,6 +40,8 @@ class BaseFetcher(ABC):
         self.site_key = str(site_config.get("key", ""))
         # 翻页被限频/中断时置 True，编排层据此判 partial_succeeded
         self.truncated = False
+        # 非致命问题（部分子页面失败等），编排层写入任务日志/error_message 供排查
+        self.warnings: list[str] = []
         # is_available() 为 False 时的可读原因（不得包含密钥值）
         self.unavailable_reason: str | None = None
         # 任务指定的领域（None/空表示全量）；多领域站点据此过滤要采集的子页面
