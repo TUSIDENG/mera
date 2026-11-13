@@ -27,26 +27,29 @@ export function sortItems(items: RankedSnapshot[], sort: SortState): RankedSnaps
       cmp = a.model_id.localeCompare(b.model_id)
     } else if (key === 'provider') {
       cmp = a.provider.localeCompare(b.provider)
-    } else if (key === 'benchmark_score') {
-      cmp = Number(a.benchmark_score) - Number(b.benchmark_score)
     } else if (key === 'updated_at') {
       cmp = a.updated_at.localeCompare(b.updated_at)
     } else {
-      // 动态维度分：从 scores 取，null 排最后
-      const av = a.scores?.[key]
-      const bv = b.scores?.[key]
-      if (av === null || av === undefined) cmp = bv === null || bv === undefined ? 0 : 1
-      else if (bv === null || bv === undefined) cmp = -1
-      else cmp = Number(av) - Number(bv)
+      // 数值列（主榜分 / 维度分）：缺失值恒定排末尾，不随升/降序翻转
+      const av = key === 'benchmark_score' ? a.benchmark_score : a.scores?.[key]
+      const bv = key === 'benchmark_score' ? b.benchmark_score : b.scores?.[key]
+      const aMissing = av === null || av === undefined || av === ''
+      const bMissing = bv === null || bv === undefined || bv === ''
+      if (aMissing || bMissing) {
+        if (aMissing && bMissing) return 0
+        return aMissing ? 1 : -1
+      }
+      cmp = Number(av) - Number(bv)
     }
     return cmp * dir
   })
 }
 
-/** 榜单表格：客户端排序 + 分页 */
-export function useLeaderboardTable(items: Snapshot[], pageSize = 20) {
+/** 榜单表格：客户端排序 + 分页（每页条数可切换） */
+export function useLeaderboardTable(items: Snapshot[], initialPageSize = 20) {
   const [sort, setSort] = useState<SortState>({ key: 'benchmark_score', desc: true })
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSizeState] = useState(initialPageSize)
 
   const ranked = useMemo<RankedSnapshot[]>(
     () => items.map((s, i) => ({ ...s, rank: i + 1 })),
@@ -70,5 +73,20 @@ export function useLeaderboardTable(items: Snapshot[], pageSize = 20) {
     setPage(1)
   }
 
-  return { rows, sort, toggleSort, page: safePage, setPage, pageCount, total: sorted.length }
+  const setPageSize = (size: number) => {
+    setPageSizeState(size)
+    setPage(1) // 换每页条数后页码重置，避免停在越界页
+  }
+
+  return {
+    rows,
+    sort,
+    toggleSort,
+    page: safePage,
+    setPage,
+    pageCount,
+    total: sorted.length,
+    pageSize,
+    setPageSize,
+  }
 }

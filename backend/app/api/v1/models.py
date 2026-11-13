@@ -6,10 +6,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.depends import get_repository
+from app.api.depends import get_repository, require_admin
+from app.core.security import Identity
 from app.repositories.repository import Repository
 from app.schemas.common import Page, PageParams
-from app.schemas.snapshots import FetchRecordOut, SnapshotOut
+from app.schemas.snapshots import (
+    FetchRecordOut,
+    SnapshotBatchDeleteIn,
+    SnapshotBatchDeleteOut,
+    SnapshotOut,
+)
 
 router = APIRouter(tags=["models"])
 
@@ -27,6 +33,17 @@ def list_models(
         page=page_params.page,
         page_size=page_params.page_size,
     )
+
+
+@router.post("/models/batch-delete", response_model=SnapshotBatchDeleteOut)
+def batch_delete_models(
+    body: SnapshotBatchDeleteIn,
+    repo: Annotated[Repository, Depends(get_repository)],
+    _: Annotated[Identity, Depends(require_admin)],
+) -> SnapshotBatchDeleteOut:
+    """批量删除榜单快照（按模型 id 或厂商），删除后下次采集会重新写入。"""
+    deleted = repo.delete_snapshots(model_ids=body.model_ids, providers=body.providers)
+    return SnapshotBatchDeleteOut(deleted=deleted)
 
 
 @router.get("/models/{model_id}/snapshots", response_model=list[SnapshotOut])

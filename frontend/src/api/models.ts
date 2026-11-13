@@ -81,3 +81,11 @@ export function listModelFetchRecords(modelId: string, page = 1, pageSize = 50) 
     `/models/${encodeURIComponent(modelId)}/fetch-records?page=${page}&page_size=${pageSize}`,
   )
 }
+
+/** 批量删除榜单快照（按模型 id 或厂商），需要管理员角色 mera-admin */
+export function deleteModelSnapshots(payload: { model_ids?: string[]; providers?: string[] }) {
+  return apiFetch<{ deleted: number }>('/models/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}

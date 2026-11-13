@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, asc, func, select, true
+from sqlalchemy import ColumnElement, and_, asc, delete, func, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -681,6 +681,25 @@ class Repository:
     def snapshots_by_model(self, model_id: str) -> list[ModelSnapshot]:
         stmt = select(ModelSnapshot).where(ModelSnapshot.model_id == model_id)
         return list(self.session.scalars(stmt).all())
+
+    def delete_snapshots(
+        self, *, model_ids: Sequence[str] = (), providers: Sequence[str] = ()
+    ) -> int:
+        """按模型 id 和/或厂商批量删除榜单快照，返回删除行数。
+
+        条件为空时拒绝执行，避免误删全表；采集留痕（fetch_records）保留不动。
+        """
+        conditions: list[ColumnElement[bool]] = []
+        if model_ids:
+            conditions.append(ModelSnapshot.model_id.in_(list(model_ids)))
+        if providers:
+            conditions.append(ModelSnapshot.provider.in_(list(providers)))
+        if not conditions:
+            raise ValueError("删除条件不能为空")
+        result = self.session.execute(
+            delete(ModelSnapshot).where(*conditions)
+        )
+        return int(result.rowcount or 0)
 
     def list_tasks(
         self, *, status: str | None, limit: int, offset: int
