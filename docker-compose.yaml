@@ -63,6 +63,9 @@ services:
       POSTGRES_DB: mera
       POSTGRES_USER: mera
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mera_local_pass}
+      # 显式固定排序规则：builtin provider + C.UTF-8，排序按码点、不依赖 glibc/musl 版本。
+      # 该参数仅在数据卷首次初始化（initdb）时生效；已有卷需按迁移步骤重建后才会应用。
+      POSTGRES_INITDB_ARGS: "--locale-provider=builtin --builtin-locale=C.UTF-8 --encoding=UTF8"
       TZ: Asia/Shanghai
     ports:
       - "5432:5432"
