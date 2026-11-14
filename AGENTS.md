@@ -22,6 +22,19 @@ MERA（Model Evaluation & Selection System）是一个大模型评估与选型�
 - 采集实现必须遵守目标站点服务条款与合规边界，不绕过登录、付费墙或强验证码。
 - 密钥、令牌和登录会话只允许通过环境变量或密钥管理注入，禁止写入仓库。
 
+## 数据库字符集与排序规则
+
+- 生产与测试环境统一使用团队提供的 PostgreSQL 服务，容器实例只用于本地开发。
+- 建库时必须显式指定字符集与排序规则（UTF8 + builtin C.UTF-8），不依赖服务端默认值：
+
+```sql
+CREATE DATABASE mera
+  WITH ENCODING 'UTF8'
+       LOCALE_PROVIDER builtin
+       BUILTIN_LOCALE 'C.UTF-8'
+       TEMPLATE template0;
+```
+
 ## 注释要求
 
 - 所有 Python 函数、Python 类、TypeScript/JavaScript 函数都必须写注释，没有注释的代码不予合入。
